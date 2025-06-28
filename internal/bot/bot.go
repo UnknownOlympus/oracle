@@ -24,10 +24,36 @@ var (
 
 	// inline menu for authorized users.
 	authMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
+	// button for info.
+	btnInfo = authMenu.Text("🙍‍♂️ About me")
+	// button for active tasks.
+	btnActiveTasks = authMenu.Text("✅ Active tasks")
+	// button for statistic.
+	btnStatistic = authMenu.Text("📈 My statistic")
 	// button for report.
 	btnReport = authMenu.Text("📊 Create report")
 	// button for logout.
 	btnLogout = authMenu.Text("🔓 Logout")
+
+	// statistic menu.
+	statMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
+	// button for today statistic.
+	btnToday = statMenu.Text("📅 Today")
+	// button for this month statistic.
+	btnMonth = statMenu.Text("📅 This Month")
+	// button fot this year statistic.
+	btnYear = statMenu.Text("📅 This Year")
+	// button for back.
+	btnBack = statMenu.Text("⬅️ Back")
+
+	btnReportPeriodCurrent = telebot.InlineButton{Unique: "report_period_current_month"}
+	btnReportPeriodLast    = telebot.InlineButton{Unique: "report_period_last_month"}
+	btnReportPeriod7Days   = telebot.InlineButton{Unique: "report_period_last_7_days"}
+
+	// fiction button for active tasks action.
+	btnTaskDetails = telebot.InlineButton{
+		Unique: "task_details",
+	}
 )
 
 // NewBot creates a new bot with the given token.
@@ -47,8 +73,17 @@ func NewBot(log *slog.Logger, repo repository.Interface, token string, poller ti
 		mainMenu.Row(btnLogin),
 	)
 	authMenu.Reply(
+		authMenu.Row(btnInfo),
+		authMenu.Row(btnActiveTasks),
+		authMenu.Row(btnStatistic),
 		authMenu.Row(btnReport),
 		authMenu.Row(btnLogout),
+	)
+	statMenu.Reply(
+		authMenu.Row(btnToday),
+		authMenu.Row(btnMonth),
+		authMenu.Row(btnYear),
+		authMenu.Row(btnBack),
 	)
 
 	botInstance.registerRoutes()
@@ -74,6 +109,7 @@ func (b *Bot) registerRoutes() {
 	b.bot.Handle("/start", b.startHandler)
 	b.bot.Handle(&btnLogin, b.authHandler)
 	b.bot.Handle(telebot.OnText, b.textHandler)
+	b.bot.Handle(&btnTaskDetails, b.taskDetailsHandler)
 
 	// group for protected routes.
 	authGroup := b.bot.Group()
@@ -81,5 +117,17 @@ func (b *Bot) registerRoutes() {
 
 	// Protected routes.
 	authGroup.Handle(&btnReport, b.reportHandler)
+	authGroup.Handle(&btnReportPeriodCurrent, b.generatorReportHandler)
+	authGroup.Handle(&btnReportPeriodLast, b.generatorReportHandler)
+	authGroup.Handle(&btnReportPeriod7Days, b.generatorReportHandler)
+
+	authGroup.Handle(&btnActiveTasks, b.activeTasksHandler)
+	authGroup.Handle(&btnStatistic, b.statisticHandler)
 	authGroup.Handle(&btnLogout, b.logoutHandler)
+	authGroup.Handle(&btnInfo, b.infoHandler)
+
+	authGroup.Handle(&btnToday, b.statisticHandlerToday)
+	authGroup.Handle(&btnMonth, b.statisticHandlerMonth)
+	authGroup.Handle(&btnYear, b.statisticHandlerYear)
+	authGroup.Handle(&btnBack, b.backHandler)
 }

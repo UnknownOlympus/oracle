@@ -1,7 +1,6 @@
 package repository_test
 
 import (
-	"context"
 	"regexp"
 	"testing"
 
@@ -24,9 +23,14 @@ const insertIntoBotUsers = `
 	VALUES ($1, $2) ON CONFLICT (employee_id) DO NOTHING
 `
 
+const selectGetEmployee = `
+	SELECT id, fullname, shortname, position, email, phone FROM employees
+	WHERE id = (SELECT employee_id FROM bot_users WHERE telegram_id = $1);		
+`
+
 func TestLinkTelegramIDByEmail(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	telegramID := int64(12345)
 	employeeID := 101
 	email := "test@test.com"
@@ -243,7 +247,7 @@ func TestLinkTelegramIDByEmail(t *testing.T) {
 
 func TestIsUserAuthenticated(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	telegramID := int64(12345)
 
 	t.Run("error - failed to check user", func(t *testing.T) {
@@ -286,7 +290,7 @@ func TestIsUserAuthenticated(t *testing.T) {
 
 func TestDeleteUserByID(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	telegramID := int64(12345)
 
 	t.Run("error - failed to delete user", func(t *testing.T) {
@@ -320,6 +324,56 @@ func TestDeleteUserByID(t *testing.T) {
 		err = repo.DeleteUserByID(ctx, telegramID)
 
 		assert.NoError(t, err)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+func TestGetEmployee(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	telegramID := int64(12345)
+
+	t.Run("error - failed to get employee", func(t *testing.T) {
+		t.Parallel()
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(selectGetEmployee)).WithArgs(telegramID).WillReturnError(assert.AnError)
+
+		_, err = repo.GetEmployee(ctx, telegramID)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, assert.AnError)
+		require.ErrorContains(t, err, "failed to get employee data")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("success - get employee", func(t *testing.T) {
+		t.Parallel()
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(selectGetEmployee)).
+			WithArgs(telegramID).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"id", "fullname", "shortname", "position", "email", "phone"}).
+					AddRow(123, "testFull", "testShort", "testPos", "testEmail", "testPhone"),
+			)
+
+		employee, err := repo.GetEmployee(ctx, telegramID)
+
+		require.NoError(t, err)
+		assert.Equal(t, "testFull", employee.FullName)
+		assert.Equal(t, "testShort", employee.ShortName)
+		assert.Equal(t, "testPos", employee.Position)
+		assert.Equal(t, "testEmail", employee.Email)
+		assert.Equal(t, "testPhone", employee.Phone)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }

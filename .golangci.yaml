@@ -326,6 +326,9 @@ linters:
         - .Send(
         - .Reply(
         - .Commit(
+        - .Repsond(
+        - .Respond(
+        - .Edit(
 
     mnd:
       # List of function patterns to exclude from analysis.

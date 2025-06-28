@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Houeta/radireporter-bot/internal/models"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -92,4 +93,31 @@ func (r *Repository) DeleteUserByID(ctx context.Context, telegramID int64) error
 	}
 
 	return nil
+}
+
+// GetEmployee retrieves an employee's details from the database using their Telegram ID.
+// It returns the employee's information as a models.Employee struct and an error if the operation fails.
+//
+// Parameters:
+//   - ctx: The context for the database operation.
+//   - telegramID: The Telegram ID of the user whose employee details are to be fetched.
+//
+// Returns:
+//   - models.Employee: The employee details.
+//   - error: An error if the retrieval fails.
+func (r *Repository) GetEmployee(ctx context.Context, telegramID int64) (models.Employee, error) {
+	var employee models.Employee
+	query := `
+		SELECT id, fullname, shortname, position, email, phone FROM employees
+		WHERE id = (SELECT employee_id FROM bot_users WHERE telegram_id = $1);		
+`
+
+	err := r.db.QueryRow(ctx, query, telegramID).Scan(
+		&employee.ID, &employee.FullName, &employee.ShortName, &employee.Position, &employee.Email, &employee.Phone,
+	)
+	if err != nil {
+		return models.Employee{}, fmt.Errorf("failed to get employee data: %w", err)
+	}
+
+	return employee, nil
 }

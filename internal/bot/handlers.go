@@ -13,18 +13,36 @@ import (
 var userStates = make(map[int64]string)
 
 const (
-	// stateDefault represents the default state of the bot.
-	// stateDefault = ""
 	// stateAwaitingEmail indicates that the bot is waiting for the user's email input.
 	stateAwaitingEmail = "awaiting_email"
+
+	// ErrInternal is the error message returned when there is an internal server error.
+	ErrInternal = "🚫 Internal server error, please try again later"
 )
 
 // startHandler process command /start.
 func (b *Bot) startHandler(ctx telebot.Context) error {
-	b.log.Info("User started the bot", "id", ctx.Sender().ID, "username", ctx.Sender().Username)
+	var responseText string
+	selectedMenu := mainMenu
+	userID := ctx.Sender().ID
 
-	responseText := "🤡 Welcome to the almshouse, slave of Radionet!\nTo access features, please log in."
-	return ctx.Send(responseText, mainMenu)
+	b.log.Info("User started the bot", "id", userID, "username", ctx.Sender().Username)
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	isAuth, err := b.repo.IsUserAuthenticated(timeoutCtx, userID)
+	switch {
+	case err != nil:
+		responseText = ErrInternal
+	case isAuth:
+		responseText = "🤡 Welcome to the almshouse, slave of Radionet!"
+		selectedMenu = authMenu
+	case !isAuth:
+		responseText = "🤡 Welcome to the almshouse, slave of Radionet!\nTo access features, please log in."
+	}
+
+	return ctx.Send(responseText, selectedMenu)
 }
 
 // authHandler handles the authentication process for the bot.
@@ -34,33 +52,6 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 func (b *Bot) authHandler(ctx telebot.Context) error {
 	userStates[ctx.Sender().ID] = stateAwaitingEmail
 	return ctx.Send("📧 Enter your email address, which is specified in the US system..")
-}
-
-// logoutHandler handles the logout process for a user. It removes the user's state from
-// the userStates map, logs the logout action, and attempts to delete the user from the
-// repository. If the deletion is successful, it sends a success message; otherwise, it
-// informs the user of a failure. The operation is performed with a timeout of 3 seconds.
-func (b *Bot) logoutHandler(ctx telebot.Context) error {
-	userID := ctx.Sender().ID
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	delete(userStates, userID)
-	b.log.Info("User logged out", "user", userID)
-
-	err := b.repo.DeleteUserByID(timeoutCtx, userID)
-	if err != nil {
-		return ctx.Send("💩 Failed to logout, please try later")
-	}
-
-	return ctx.Send("😢 Logout was successfull", mainMenu)
-}
-
-// reportHandler in WIP.
-func (b *Bot) reportHandler(ctx telebot.Context) error {
-	_ = ctx.Respond()
-
-	return ctx.Send("Report function: WIP")
 }
 
 // textHandler processes incoming text messages from users. It checks the user's state,
@@ -100,7 +91,7 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 			return ctx.Send("❌ User with this email not found. Try again:")
 		}
 		b.log.Error("Failed to link telegram id with employee", "error", err)
-		return ctx.Send("🚫 Internal server error, please try again later")
+		return ctx.Send(ErrInternal)
 	}
 
 	delete(userStates, userID)
