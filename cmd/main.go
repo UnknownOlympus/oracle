@@ -2,22 +2,31 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Houeta/radireporter-bot/config"
 	"github.com/Houeta/radireporter-bot/internal/bot"
+	"github.com/Houeta/radireporter-bot/internal/metrics"
 	"github.com/Houeta/radireporter-bot/internal/repository"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Constants for different environment types.
 const (
-	envLocal = "local"
-	envDev   = "development"
-	envProd  = "production"
+	envLocal   = "local"
+	envDev     = "development"
+	envProd    = "production"
+	serverPort = 8080
 )
 
 // main is the entry point of the application.
@@ -32,6 +41,12 @@ func main() {
 	// Set up the logger based on the environment.
 	logger := setupLogger(cfg.Env)
 
+	// Create a separate registry for metrics with exemplar
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(collectors.NewGoCollector())
+	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	appMetrics := metrics.NewMetrics(reg)
+
 	// Initialize the database connection.
 	dtb, err := repository.NewDatabase(
 		cfg.Database.Host, cfg.Database.Port, cfg.Database.User, cfg.Database.Password, cfg.Database.Name,
@@ -44,7 +59,7 @@ func main() {
 	repo := repository.NewRepository(dtb)
 
 	// Initialize the bot with logger, repository, token, and poller timeout.
-	radiBot, err := bot.NewBot(logger, repo, cfg.Token, cfg.PollerTimeout)
+	radiBot, err := bot.NewBot(logger, repo, appMetrics, cfg.Token, cfg.PollerTimeout)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
@@ -55,9 +70,10 @@ func main() {
 	logger.InfoContext(ctx, "Application started. Press Ctrl+C to stop.")
 
 	// Start the bot in a goroutine to allow main to listen for signals.
-	go func() {
-		radiBot.Start()
-	}()
+	go radiBot.Start()
+
+	// Start the moniroting server
+	go startMonitoringServer(ctx, logger, reg, dtb, serverPort)
 
 	// Wait for the context to be canceled (e.g., by Ctrl+C).
 	<-ctx.Done()
@@ -70,6 +86,52 @@ func main() {
 
 	// Log graceful shutdown completion.
 	logger.InfoContext(ctx, "Application stopped gracefully.")
+}
+
+// startMonitoringServer starts an HTTP server that provides health check and metrics endpoints.
+// It listens on the specified port and logs the server's status and any errors encountered.
+//
+// Parameters:
+// - ctx: A context.Context for managing cancellation and timeouts.
+// - log: A logger for logging server events and errors.
+// - reg: A registry with Prometheus collectors.
+// - dtb: A pgxpool connector for database methods (ping)
+// - port: The port number on which the server will listen.
+func startMonitoringServer(
+	ctx context.Context,
+	log *slog.Logger,
+	reg *prometheus.Registry,
+	dtb *pgxpool.Pool,
+	port int,
+) {
+	http.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
+		log.DebugContext(ctx, "Performing health checks...")
+		status, body := http.StatusOK, "OK"
+		if err := dtb.Ping(ctx); err != nil {
+			status, body = http.StatusServiceUnavailable, "DB ping failed"
+		}
+		writer.WriteHeader(status)
+		_, err := writer.Write([]byte(body))
+		if err != nil {
+			log.ErrorContext(ctx, "failed to write reply", "error", err)
+		}
+
+		log.DebugContext(ctx, "Health checks completed", "status", http.StatusOK)
+	})
+	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+
+	log.InfoContext(ctx, "Starting monitoring server", "port", port)
+	readTimeout := 5
+	writeTimeout := 10
+	server := &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      http.DefaultServeMux,
+		ReadTimeout:  time.Duration(readTimeout) * time.Second,
+		WriteTimeout: time.Duration(writeTimeout) * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
+		log.ErrorContext(ctx, "Monitoring server failed", "error", err)
+	}
 }
 
 // setupLogger initializes and returns a logger based on the environment provided.

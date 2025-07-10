@@ -23,13 +23,18 @@ func (b *Bot) statisticHandler(ctx telebot.Context) error {
 // generation of the statistics, it sends an internal error message.
 func (b *Bot) statisticHandlerToday(ctx telebot.Context) error {
 	b.log.Info("User requested stats", "user", ctx.Sender().ID, "duration", "day")
+	b.metrics.CommandReceived.WithLabelValues("statistic").Inc()
 	endDate := time.Now()
 
+	startTime := time.Now()
 	responseText, err := generateStatisticString(b, ctx.Sender().ID, endDate, endDate)
+	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
 	if err != nil {
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
 
@@ -39,14 +44,19 @@ func (b *Bot) statisticHandlerToday(ctx telebot.Context) error {
 // If an error occurs during the generation of the statistics, it sends an internal error message.
 func (b *Bot) statisticHandlerMonth(ctx telebot.Context) error {
 	b.log.Info("User requested stats", "user", ctx.Sender().ID, "duration", "month")
+	b.metrics.CommandReceived.WithLabelValues("statistic").Inc()
 	endDate := time.Now()
 	startDate := time.Date(endDate.Year(), endDate.Month(), 1, 0, 0, 0, 0, endDate.Location())
 
+	startTime := time.Now()
 	responseText, err := generateStatisticString(b, ctx.Sender().ID, startDate, endDate)
+	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
 	if err != nil {
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
 
@@ -56,14 +66,19 @@ func (b *Bot) statisticHandlerMonth(ctx telebot.Context) error {
 // If an error occurs during the generation of the statistics string, it sends an internal error message.
 func (b *Bot) statisticHandlerYear(ctx telebot.Context) error {
 	b.log.Info("User requested stats", "user", ctx.Sender().ID, "duration", "year")
+	b.metrics.CommandReceived.WithLabelValues("statistic").Inc()
 	endDate := time.Now()
 	startDate := time.Date(endDate.Year(), time.January, 1, 0, 0, 0, 0, endDate.Location())
 
+	startTime := time.Now()
 	responseText, err := generateStatisticString(b, ctx.Sender().ID, startDate, endDate)
+	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
 	if err != nil {
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
 

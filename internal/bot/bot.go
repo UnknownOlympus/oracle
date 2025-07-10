@@ -5,15 +5,17 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Houeta/radireporter-bot/internal/metrics"
 	"github.com/Houeta/radireporter-bot/internal/repository"
 	"gopkg.in/telebot.v4"
 )
 
 // Bot contains the bot API instance and other information.
 type Bot struct {
-	bot  *telebot.Bot
-	log  *slog.Logger
-	repo repository.Interface
+	bot     *telebot.Bot
+	log     *slog.Logger
+	repo    repository.Interface
+	metrics *metrics.Metrics
 }
 
 var (
@@ -57,7 +59,13 @@ var (
 )
 
 // NewBot creates a new bot with the given token.
-func NewBot(log *slog.Logger, repo repository.Interface, token string, poller time.Duration) (*Bot, error) {
+func NewBot(
+	log *slog.Logger,
+	repo repository.Interface,
+	metrics *metrics.Metrics,
+	token string,
+	poller time.Duration,
+) (*Bot, error) {
 	bot, err := telebot.NewBot(telebot.Settings{
 		Token:  token,
 		Poller: &telebot.LongPoller{Timeout: poller},
@@ -67,7 +75,7 @@ func NewBot(log *slog.Logger, repo repository.Interface, token string, poller ti
 	}
 	log.Info("Authorized on account", "account", bot.Me.Username)
 
-	botInstance := &Bot{bot: bot, log: log, repo: repo}
+	botInstance := &Bot{bot: bot, log: log, repo: repo, metrics: metrics}
 
 	mainMenu.Reply(
 		mainMenu.Row(btnLogin),

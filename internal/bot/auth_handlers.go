@@ -22,12 +22,17 @@ func (b *Bot) logoutHandler(ctx telebot.Context) error {
 
 	delete(userStates, userID)
 	b.log.Info("User logged out", "user", userID)
+	b.metrics.CommandReceived.WithLabelValues("logout").Inc()
 
+	startTime := time.Now()
 	err := b.repo.DeleteUserByID(timeoutCtx, userID)
+	b.metrics.DBQueryDuration.WithLabelValues("delete_user").Observe(time.Since(startTime).Seconds())
 	if err != nil {
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send("💩 Failed to logout, please try later")
 	}
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send("😢 Logout was successfull", mainMenu)
 }
 
@@ -37,15 +42,20 @@ func (b *Bot) logoutHandler(ctx telebot.Context) error {
 // error and sends an internal error message to the user.
 func (b *Bot) infoHandler(ctx telebot.Context) error {
 	b.log.Info("User requested info", "user", ctx.Sender().ID)
+	b.metrics.CommandReceived.WithLabelValues("info").Inc()
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	startTime := time.Now()
 	user, err := b.repo.GetEmployee(timeoutCtx, ctx.Sender().ID)
+	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	responseText := fmt.Sprintf(`
 		🤦‍♂️ *These mortals again…*
 
@@ -69,17 +79,22 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 	userID := ctx.Sender().ID
 	b.log.Info("User requested active tasks", "user", userID)
+	b.metrics.CommandReceived.WithLabelValues("active_tasks").Inc()
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	startTime := time.Now()
 	tasks, err := b.repo.GetActiveTasksByExecutor(timeoutCtx, userID)
+	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get active tasks", "error", err, "user", userID)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
 	if len(tasks) == 0 {
+		b.metrics.SentMessages.WithLabelValues("text").Inc()
 		return ctx.Send("🎉 You have no active tasks!")
 	}
 
@@ -100,6 +115,7 @@ func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 		}
 	}
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	menu := &telebot.ReplyMarkup{InlineKeyboard: rows}
 	return ctx.Send("Here is a list of your active tasks:", menu)
 }
@@ -115,9 +131,11 @@ func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 // Returns:
 //   - error: Returns an error if there is an issue processing the request or editing the message.
 func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
+	b.metrics.CommandReceived.WithLabelValues("task_details").Inc()
 	taskID, err := strconv.Atoi(ctx.Data())
 	if err != nil {
 		b.log.Error("Invalid task ID in callback", "error", err, "data", ctx.Data())
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		if err = ctx.Respond(); err != nil {
 			b.log.Error("Failed to send respond to callback", "error", err)
 		}
@@ -129,9 +147,12 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	startTime := time.Now()
 	details, err := b.repo.GetTaskDetailsByID(timeoutCtx, taskID)
+	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get task details", "error", err, "taskID", taskID)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Respond(&telebot.CallbackResponse{Text: "Error retrieving data."})
 	}
 
@@ -151,6 +172,7 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 		details.Description,
 	)
 
+	b.metrics.SentMessages.WithLabelValues("edit").Inc()
 	err = ctx.Edit(messageText, telebot.ModeMarkdown, ctx.Message().ReplyMarkup)
 	if err != nil && !errors.Is(err, telebot.ErrSameMessageContent) {
 		b.log.Error("Failed to edit message", "error", err)
@@ -171,6 +193,7 @@ func (b *Bot) reportHandler(ctx telebot.Context) error {
 		menu.Row(menu.Data("⏰ For the last 7 days", "report_period_last_7_days")),
 	)
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send("🐷 Choose how many days you want the report for", menu)
 }
 
@@ -187,6 +210,8 @@ func (b *Bot) reportHandler(ctx telebot.Context) error {
 // If the report generation fails or there are no completed tasks for the selected period,
 // an appropriate error message is sent to the user.
 func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
+	b.metrics.CommandReceived.WithLabelValues("report").Inc()
+	b.metrics.SentMessages.WithLabelValues("respond").Inc()
 	_ = ctx.Respond(&telebot.CallbackResponse{Text: "🔧 I'll do it now!!! Wait...😩"})
 	userID := ctx.Sender().ID
 	b.log.Info("User requested report", "user", userID, "data", ctx.Callback().Unique)
@@ -195,29 +220,38 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 	defer cancel()
 
 	var from, to time.Time
+	var periodMetric string
 	now := time.Now()
 
 	switch ctx.Callback().Unique {
 	case "report_period_current_month":
+		periodMetric = "current_1m"
 		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 		to = from.AddDate(0, 1, 0).Add(-1 * time.Nanosecond)
 	case "report_period_last_month":
+		periodMetric = "last_1m"
 		from = time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
 		to = from.AddDate(0, 1, 0).Add(-1 * time.Nanosecond)
 	case "report_period_last_7_days":
+		periodMetric = "last_7d"
 		from = now.AddDate(0, 0, -7)
 		to = now
 	default:
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Edit("💩 Unsupported time period", ctx.Message().ReplyMarkup)
 	}
 
+	startTime := time.Now()
 	reportBuffer, err := report.GenerateExcelReport(timeoutCtx, b.repo, userID, from, to)
+	b.metrics.ReportGeneration.WithLabelValues(periodMetric).Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		if errors.Is(err, report.ErrNoTasks) {
+			b.metrics.SentMessages.WithLabelValues("edit").Inc()
 			return ctx.Edit("💩 There are no completed tasks for the report for the selected period.",
 				ctx.Message().ReplyMarkup)
 		}
 
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		b.log.Error("Failed to generate report", "error", err, "user", userID)
 		return ctx.Edit(ErrInternal, ctx.Message().ReplyMarkup)
 	}
@@ -234,7 +268,9 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 		from.Format("02.01.2006"), to.Format("02.01.2006"),
 	)
 
+	b.metrics.SentMessages.WithLabelValues("edit").Inc()
 	_ = ctx.Edit(reponseText, ctx.Message().ReplyMarkup)
 
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send(reportFile)
 }
