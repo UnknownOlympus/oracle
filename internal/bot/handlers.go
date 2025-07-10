@@ -25,22 +25,31 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 	var responseText string
 	selectedMenu := mainMenu
 	userID := ctx.Sender().ID
+	metricLabel := "text"
 
 	b.log.Info("User started the bot", "id", userID, "username", ctx.Sender().Username)
+	b.metrics.CommandReceived.WithLabelValues("start").Inc()
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	startTime := time.Now()
 	isAuth, err := b.repo.IsUserAuthenticated(timeoutCtx, userID)
+	b.metrics.DBQueryDuration.WithLabelValues("is_user_authenticated").Observe(time.Since(startTime).Seconds())
+
 	switch {
 	case err != nil:
 		responseText = ErrInternal
+		metricLabel = "error"
 	case isAuth:
 		responseText = "🤡 Welcome to the almshouse, slave of Radionet!"
 		selectedMenu = authMenu
 	case !isAuth:
 		responseText = "🤡 Welcome to the almshouse, slave of Radionet!\nTo access features, please log in."
+		b.metrics.NewUsers.Inc()
 	}
+
+	b.metrics.SentMessages.WithLabelValues(metricLabel).Inc()
 
 	return ctx.Send(responseText, selectedMenu)
 }
@@ -51,6 +60,8 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 // that the bot is awaiting the email input.
 func (b *Bot) authHandler(ctx telebot.Context) error {
 	userStates[ctx.Sender().ID] = stateAwaitingEmail
+	b.metrics.CommandReceived.WithLabelValues("login").Inc()
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send("📧 Enter your email address, which is specified in the US system..")
 }
 
@@ -65,21 +76,28 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 	defer cancel()
 
 	if !ok || state != stateAwaitingEmail {
+		b.metrics.SentMessages.WithLabelValues("reply").Inc()
 		return ctx.Reply("🐒 Use buttons, my little monkeys. Who did I make them for?")
 	}
 
 	email := ctx.Text()
 	b.log.Debug("User is trying to authenticate", "user", userID, "email", email)
 
+	startTime := time.Now()
 	err := b.repo.LinkTelegramIDByEmail(timeoutCtx, userID, email)
+	b.metrics.DBQueryDuration.WithLabelValues("link_telegram_id").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		if errors.Is(err, repository.ErrUserAlreadyLinked) {
 			b.log.Info("User already linked to another id", "user", userID, "email", email)
 			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
+			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
+			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
 			return ctx.Send("❌User already linked to other telegram account. Log out from other account and try again.")
 		}
 		if errors.Is(err, repository.ErrIDExists) {
 			b.log.Info("User already has connection with another employee", "user", userID, "email", email)
+			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
+			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
 			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
 			return ctx.Send(
 				"❌ This telegram ID already linked to other user. Log out from other account and try again.",
@@ -87,15 +105,20 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 		}
 		if errors.Is(err, repository.ErrUserNotFound) {
 			b.log.Info("User with this email not found", "user", userID, "email", email)
+			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
+			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
 			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
 			return ctx.Send("❌ User with this email not found. Try again:")
 		}
 		b.log.Error("Failed to link telegram id with employee", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
 	delete(userStates, userID)
 	b.log.Info("User successfully authenticated", "user", userID, "email", email)
+	b.metrics.SentMessages.WithLabelValues("reaction").Inc()
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbUp))
 	return ctx.Send("✅ Authentication successful!", authMenu)
 }
