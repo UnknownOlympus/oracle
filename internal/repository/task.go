@@ -169,7 +169,9 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 			t.description,
 			t.address,
 			t.customer_name,
-			t.comments
+			t.comments,
+			t.latitude,
+			t.longitude
 		FROM tasks t
 		JOIN task_types tt ON t.task_type_id = tt.type_id
 		WHERE t.task_id = $1;
@@ -183,6 +185,8 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 		&details.Address,
 		&details.CustomerName,
 		&details.Comments,
+		&details.Latitude,
+		&details.Longitude,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
