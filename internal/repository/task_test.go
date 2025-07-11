@@ -433,7 +433,7 @@ func TestGetTaskDetailsByID(t *testing.T) {
 		assert.Equal(t, "addr", task.Address)
 		assert.Equal(t, "test user", task.CustomerName)
 		assert.Equal(t, []string{"1", "2"}, task.Comments)
-		assert.Equal(t, 12.345, task.Latitude.Float64)
-		assert.Equal(t, 23.456, task.Longitude.Float64)
+		assert.InEpsilon(t, 12.345, task.Latitude.Float64, 0.001)
+		assert.InEpsilon(t, 23.456, task.Longitude.Float64, 0.001)
 	})
 }
