@@ -359,7 +359,9 @@ func TestGetTaskDetailsByID(t *testing.T) {
 			t.description,
 			t.address,
 			t.customer_name,
-			t.comments
+			t.comments,
+			t.latitude,
+			t.longitude
 		FROM tasks t
 		JOIN task_types tt ON t.task_type_id = tt.type_id
 		WHERE t.task_id = $1;
@@ -416,9 +418,9 @@ func TestGetTaskDetailsByID(t *testing.T) {
 			WithArgs(taskID).
 			WillReturnRows(mock.NewRows([]string{
 				"task_id", "type_name", "creation_date", "description",
-				"address", "customer_name", "comments",
+				"address", "customer_name", "comments", "latitude", "longitude",
 			}).
-				AddRow(123, "type", now, "descr", "addr", "test user", []string{"1", "2"}),
+				AddRow(123, "type", now, "descr", "addr", "test user", []string{"1", "2"}, 12.345, 23.456),
 			)
 
 		task, err := repo.GetTaskDetailsByID(ctx, taskID)
@@ -431,5 +433,7 @@ func TestGetTaskDetailsByID(t *testing.T) {
 		assert.Equal(t, "addr", task.Address)
 		assert.Equal(t, "test user", task.CustomerName)
 		assert.Equal(t, []string{"1", "2"}, task.Comments)
+		assert.Equal(t, 12.345, task.Latitude.Float64)
+		assert.Equal(t, 23.456, task.Longitude.Float64)
 	})
 }

@@ -171,6 +171,12 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 		details.Address,
 		details.Description,
 	)
+	if details.Latitude.Valid && details.Longitude.Valid {
+		mapURL := fmt.Sprintf("https://maps.google.com/?q=%f,%f", details.Latitude.Float64, details.Longitude.Float64)
+		messageText += fmt.Sprintf("\n\n[📍 Open on map](%s)", mapURL)
+	} else {
+		messageText += "\n\n📍 *Location not added yet*"
+	}
 
 	b.metrics.SentMessages.WithLabelValues("edit").Inc()
 	err = ctx.Edit(messageText, telebot.ModeMarkdown, ctx.Message().ReplyMarkup)
