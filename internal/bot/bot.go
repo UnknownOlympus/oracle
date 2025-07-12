@@ -30,6 +30,8 @@ var (
 	btnInfo = authMenu.Text("🙍‍♂️ About me")
 	// button for active tasks.
 	btnActiveTasks = authMenu.Text("✅ Active tasks")
+	// button for near tasks
+	btnNear = authMenu.Text("🗺️ Tasks near you")
 	// button for statistic.
 	btnStatistic = authMenu.Text("📈 My statistic")
 	// button for report.
@@ -48,6 +50,11 @@ var (
 	// button for back.
 	btnBack = statMenu.Text("⬅️ Back")
 
+	nearMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
+	// button for send location
+	btnLocation = authMenu.Location("📍  Send location")
+
+	// inline buttons for report period
 	btnReportPeriodCurrent = telebot.InlineButton{Unique: "report_period_current_month"}
 	btnReportPeriodLast    = telebot.InlineButton{Unique: "report_period_last_month"}
 	btnReportPeriod7Days   = telebot.InlineButton{Unique: "report_period_last_7_days"}
@@ -83,6 +90,7 @@ func NewBot(
 	authMenu.Reply(
 		authMenu.Row(btnInfo),
 		authMenu.Row(btnActiveTasks),
+		authMenu.Row(btnNear),
 		authMenu.Row(btnStatistic),
 		authMenu.Row(btnReport),
 		authMenu.Row(btnLogout),
@@ -92,6 +100,10 @@ func NewBot(
 		authMenu.Row(btnMonth),
 		authMenu.Row(btnYear),
 		authMenu.Row(btnBack),
+	)
+	nearMenu.Reply(
+		nearMenu.Row(btnLocation),
+		nearMenu.Row(btnBack),
 	)
 
 	botInstance.registerRoutes()
@@ -118,6 +130,7 @@ func (b *Bot) registerRoutes() {
 	b.bot.Handle(&btnLogin, b.authHandler)
 	b.bot.Handle(telebot.OnText, b.textHandler)
 	b.bot.Handle(&btnTaskDetails, b.taskDetailsHandler)
+	b.bot.Handle(telebot.OnLocation, b.locationHandler)
 
 	// group for protected routes.
 	authGroup := b.bot.Group()
@@ -138,4 +151,6 @@ func (b *Bot) registerRoutes() {
 	authGroup.Handle(&btnMonth, b.statisticHandlerMonth)
 	authGroup.Handle(&btnYear, b.statisticHandlerYear)
 	authGroup.Handle(&btnBack, b.backHandler)
+
+	authGroup.Handle(&btnNear, b.nearTasksHandler)
 }

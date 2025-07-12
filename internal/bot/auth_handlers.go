@@ -280,3 +280,13 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send(reportFile)
 }
+
+func (b *Bot) nearTasksHandler(ctx telebot.Context) error {
+	b.log.Info("User requested near tasks", "user", ctx.Sender().ID)
+	b.metrics.CommandReceived.WithLabelValues("near").Inc()
+
+	userStates[ctx.Sender().ID] = stateAwaitingLocation
+
+	b.metrics.SentMessages.WithLabelValues("reply").Inc()
+	return ctx.Reply("🧳 I'm ready, but first provide your geolocation", nearMenu)
+}
