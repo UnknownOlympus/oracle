@@ -23,6 +23,7 @@ type Interface interface {
 	GetActiveTasksByExecutor(ctx context.Context, telegramID int64) ([]models.ActiveTask, error)
 	GetTaskDetailsByID(ctx context.Context, taskID int) (*models.TaskDetails, error)
 	GetCompletedTasksByExecutor(ctx context.Context, telegramID int64, from, to time.Time) ([]models.TaskDetails, error)
+	GetTasksInRadius(ctx context.Context, lat, lng float32, radius int) ([]models.ActiveTask, error)
 }
 
 // NewRepository creates a new instance of Repository with the provided Database.

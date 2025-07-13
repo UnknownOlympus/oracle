@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Houeta/radireporter-bot/internal/repository"
@@ -15,6 +17,9 @@ var userStates = make(map[int64]string)
 const (
 	// stateAwaitingEmail indicates that the bot is waiting for the user's email input.
 	stateAwaitingEmail = "awaiting_email"
+
+	// stateAwaitingLocation indicates that the bot is waiting fot the user's location input.
+	stateAwaitingLocation = "awaiting_location"
 
 	// ErrInternal is the error message returned when there is an internal server error.
 	ErrInternal = "🚫 Internal server error, please try again later"
@@ -92,7 +97,9 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
-			return ctx.Send("❌User already linked to other telegram account. Log out from other account and try again.")
+			return ctx.Send(
+				"❌ User already linked to other telegram account. Log out from other account and try again.",
+			)
 		}
 		if errors.Is(err, repository.ErrIDExists) {
 			b.log.Info("User already has connection with another employee", "user", userID, "email", email)
@@ -121,4 +128,68 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbUp))
 	return ctx.Send("✅ Authentication successful!", authMenu)
+}
+
+// locationHandler processes the user's location sent via a message.
+// It retrieves tasks within a specified radius of the user's location
+// and sends back a response with the nearest tasks or an appropriate
+// message if no tasks are found. It also handles user state management
+// and logs relevant information for monitoring purposes.
+func (b *Bot) locationHandler(ctx telebot.Context) error {
+	userID := ctx.Sender().ID
+	latitude := ctx.Message().Location.Lat
+	longitude := ctx.Message().Location.Lng
+	radius := 15
+	state, ok := userStates[userID]
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	b.log.Info("User sent geolocation", "user", userID, "latitude", latitude, "longitude", longitude)
+
+	if ok && state == stateAwaitingLocation {
+		delete(userStates, userID)
+
+		startTime := time.Now()
+		tasks, err := b.repo.GetTasksInRadius(timeoutCtx, latitude, longitude, radius)
+		b.metrics.DBQueryDuration.WithLabelValues("get_tasks_in_radius").Observe(time.Since(startTime).Seconds())
+		if err != nil {
+			b.log.Error("Failed to get nearest tasks", "error", err)
+			b.metrics.SentMessages.WithLabelValues("error").Inc()
+			return ctx.Send(ErrInternal)
+		}
+
+		if len(tasks) == 0 {
+			b.metrics.SentMessages.WithLabelValues("text").Inc()
+			return ctx.Send("🔧 You in the butt end of the world? There's seriously nothing near you!")
+		}
+
+		// creates dynamic inline keyboard
+		var rows [][]telebot.InlineButton
+		buttons := make([]telebot.InlineButton, 0, 3)
+
+		for idx, task := range tasks {
+			btn := telebot.InlineButton{
+				Unique: "task_details",
+				Text:   fmt.Sprintf("#%d", task.ID),
+				Data:   strconv.Itoa(task.ID),
+			}
+			buttons = append(buttons, btn)
+			if (idx+1)%3 == 0 || idx == len(tasks)-1 {
+				rows = append(rows, buttons)
+				buttons = nil
+			}
+		}
+
+		menu := &telebot.ReplyMarkup{InlineKeyboard: rows}
+		respnseText := fmt.Sprintf(
+			"😊 These are the tasks closest to your location, within %d km.\n(Sorted by closest distance)",
+			radius,
+		)
+		b.metrics.SentMessages.WithLabelValues("text").Inc()
+		return ctx.Send(respnseText, menu)
+	}
+
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	return ctx.Send("Why do you need to send me your geolocation?\nI didn't ask you to do it. 😅")
 }

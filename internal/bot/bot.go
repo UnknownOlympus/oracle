@@ -30,7 +30,7 @@ var (
 	btnInfo = authMenu.Text("🙍‍♂️ About me")
 	// button for active tasks.
 	btnActiveTasks = authMenu.Text("✅ Active tasks")
-	// button for near tasks
+	// button for near tasks.
 	btnNear = authMenu.Text("🗺️ Tasks near you")
 	// button for statistic.
 	btnStatistic = authMenu.Text("📈 My statistic")
@@ -51,10 +51,10 @@ var (
 	btnBack = statMenu.Text("⬅️ Back")
 
 	nearMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
-	// button for send location
+	// button for send location.
 	btnLocation = authMenu.Location("📍  Send location")
 
-	// inline buttons for report period
+	// inline buttons for report period.
 	btnReportPeriodCurrent = telebot.InlineButton{Unique: "report_period_current_month"}
 	btnReportPeriodLast    = telebot.InlineButton{Unique: "report_period_last_month"}
 	btnReportPeriod7Days   = telebot.InlineButton{Unique: "report_period_last_7_days"}

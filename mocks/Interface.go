@@ -182,6 +182,36 @@ func (_m *Interface) GetTaskSummary(ctx context.Context, telegramID int64, start
 	return r0, r1
 }
 
+// GetTasksInRadius provides a mock function with given fields: ctx, lat, lng, radius
+func (_m *Interface) GetTasksInRadius(ctx context.Context, lat float32, lng float32, radius int) ([]models.ActiveTask, error) {
+	ret := _m.Called(ctx, lat, lng, radius)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTasksInRadius")
+	}
+
+	var r0 []models.ActiveTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, float32, float32, int) ([]models.ActiveTask, error)); ok {
+		return rf(ctx, lat, lng, radius)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, float32, float32, int) []models.ActiveTask); ok {
+		r0 = rf(ctx, lat, lng, radius)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.ActiveTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, float32, float32, int) error); ok {
+		r1 = rf(ctx, lat, lng, radius)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // IsUserAuthenticated provides a mock function with given fields: ctx, telegramID
 func (_m *Interface) IsUserAuthenticated(ctx context.Context, telegramID int64) (bool, error) {
 	ret := _m.Called(ctx, telegramID)
