@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Houeta/radireporter-bot/internal/report"
@@ -163,13 +164,15 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 			"*Created:* %s\n"+
 			"*Client Name:* %s\n"+
 			"*Address:* %s\n"+
-			"*Description:* %s",
+			"*Description:* %s\n"+
+			"*Assigned to:* %s",
 		details.ID,
 		details.Type,
 		details.CreationDate.Format("02.01.2006"),
 		details.CustomerName,
 		details.Address,
 		details.Description,
+		strings.Join(details.Executors, ", "),
 	)
 	if details.Latitude.Valid && details.Longitude.Valid {
 		mapURL := fmt.Sprintf("https://maps.google.com/?q=%f,%f", details.Latitude.Float64, details.Longitude.Float64)
@@ -279,4 +282,23 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send(reportFile)
+}
+
+// nearTasksHandler handles the user's request for nearby tasks.
+// It logs the request, increments metrics for command reception and sent messages,
+// updates the user's state to await location input, and replies with a message
+// prompting the user to provide their geolocation.
+// This feature is currently in beta testing, and users are encouraged to report any errors.
+func (b *Bot) nearTasksHandler(ctx telebot.Context) error {
+	b.log.Info("User requested near tasks", "user", ctx.Sender().ID)
+	b.metrics.CommandReceived.WithLabelValues("near").Inc()
+
+	userStates[ctx.Sender().ID] = stateAwaitingLocation
+
+	b.metrics.SentMessages.WithLabelValues("reply").Inc()
+	return ctx.Reply(
+		"🧳 I'm ready, but first provide your geolocation\n\n*NOTE:* This feature is in beta testing\\.\nIf you see any errors: please report them to your admin\\.",
+		nearMenu,
+		telebot.ModeMarkdownV2,
+	)
 }

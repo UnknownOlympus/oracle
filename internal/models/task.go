@@ -31,6 +31,7 @@ type TaskDetails struct {
 	Address       string        // Address related to the task
 	CustomerName  string        // Name of the customer associated with the task
 	CustomerLogin string        // Login identifier of the customer
+	Executors     []string      // List of executors related to the task
 	Comments      []string      // List of comments related to the task
 	Latitude      pgtype.Float8 // Latitude indicates the geographical latitude of the task.
 	Longitude     pgtype.Float8 // Longitude indicates the geographical longitude of the task.

@@ -171,10 +171,14 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 			t.customer_name,
 			t.comments,
 			t.latitude,
-			t.longitude
+			t.longitude,
+			COALESCE(ARRAY_AGG(e.shortname) FILTER (WHERE e.shortname IS NOT NULL), '{}') as executors
 		FROM tasks t
 		JOIN task_types tt ON t.task_type_id = tt.type_id
-		WHERE t.task_id = $1;
+		LEFT JOIN task_executors te ON t.task_id = te.task_id
+		LEFT JOIN employees e ON te.executor_id = e.id
+		WHERE t.task_id = $1
+		GROUP BY t.task_id, tt.type_name;
 	`
 	var details models.TaskDetails
 	err := r.db.QueryRow(ctx, query, taskID).Scan(
@@ -187,6 +191,7 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 		&details.Comments,
 		&details.Latitude,
 		&details.Longitude,
+		&details.Executors,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -195,4 +200,62 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 		return nil, fmt.Errorf("failed to query task details: %w", err)
 	}
 	return &details, nil
+}
+
+// GetTasksInRadius retrieves a list of active tasks within a specified radius from a given latitude and longitude.
+// It executes a SQL query to find tasks that are not closed and fall within the specified distance.
+//
+// Parameters:
+// - ctx: The context for the request, allowing for cancellation and timeout.
+// - lat: The latitude of the center point to search from.
+// - lng: The longitude of the center point to search from.
+// - radius: The radius in kilometers within which to search for tasks.
+//
+// Returns:
+// - A slice of ActiveTask models representing the tasks found within the radius.
+// - An error if the query fails or if there is an issue scanning the results.
+func (r *Repository) GetTasksInRadius(ctx context.Context, lat, lng float32, radius int) ([]models.ActiveTask, error) {
+	query := `
+		SELECT
+			task_id,
+			description
+		FROM (
+			SELECT
+				*,
+				(
+					6371 * acos(
+						cos(radians($1)) * cos(radians(latitude)) *
+						cos(radians(longitude) - radians($2)) +
+						sin(radians($1)) * sin(radians(latitude))
+					)
+				) AS distance_km
+			FROM tasks
+			WHERE
+				latitude BETWEEN ($1 - ($3 / 111.0)) AND ($1 + ($3 / 111.0))
+				AND longitude BETWEEN ($2 - ($3 / (111.0 * cos(radians($1))))) AND ($2 + ($3 / (111.0 * cos(radians($1)))))
+				AND is_closed = false
+		) AS subquery
+		WHERE distance_km <= $3
+		ORDER BY distance_km;
+	`
+	rows, err := r.db.Query(ctx, query, lat, lng, radius)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query near tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []models.ActiveTask
+	for rows.Next() {
+		var task models.ActiveTask
+		if errScan := rows.Scan(&task.ID, &task.Description); errScan != nil {
+			return nil, fmt.Errorf("failed to scan near task row: %w", errScan)
+		}
+		tasks = append(tasks, task)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
+	}
+
+	return tasks, nil
 }
