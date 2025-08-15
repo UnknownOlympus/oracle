@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/repository"
+	"github.com/UnknownOlympus/oracle/internal/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"

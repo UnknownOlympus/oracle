@@ -6,11 +6,11 @@ import "time"
 // It contains the employee's ID, full name, short name, position,
 // email address, phone number, and the date the record was created.
 type Employee struct {
-	ID        int       // Unique identifier for the employee
-	FullName  string    // Full name of the employee
-	ShortName string    // Short name or nickname of the employee
-	Position  string    // Job position of the employee
-	Email     string    // Email address of the employee
-	Phone     string    // Phone number of the employee
-	CreatedAt time.Time // Timestamp of when the employee record was created
+	ID        int       `json:"id"`         // Unique identifier for the employee
+	FullName  string    `json:"fullname"`   // Full name of the employee
+	ShortName string    `json:"shortname"`  // Short name or nickname of the employee
+	Position  string    `json:"position"`   // Job position of the employee
+	Email     string    `json:"email"`      // Email address of the employee
+	Phone     string    `json:"phone"`      // Phone number of the employee
+	CreatedAt time.Time `json:"created_at"` // Timestamp of when the employee record was created
 }

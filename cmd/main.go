@@ -11,10 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/config"
-	"github.com/Houeta/radireporter-bot/internal/bot"
-	"github.com/Houeta/radireporter-bot/internal/metrics"
-	"github.com/Houeta/radireporter-bot/internal/repository"
+	"github.com/UnknownOlympus/hermes/pkg/redisclient"
+	"github.com/UnknownOlympus/oracle/internal/bot"
+	"github.com/UnknownOlympus/oracle/internal/config"
+	"github.com/UnknownOlympus/oracle/internal/metrics"
+	"github.com/UnknownOlympus/oracle/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -55,11 +56,18 @@ func main() {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
 
+	// Initialize the redis client
+	const redisTimeout = 5 * time.Second
+	redisClient, err := redisclient.NewClient(ctx, cfg.RedisAddr, redisTimeout)
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+
 	// Create a new repository instance using the database connection.
 	repo := repository.NewRepository(dtb)
 
 	// Initialize the bot with logger, repository, token, and poller timeout.
-	radiBot, err := bot.NewBot(logger, repo, appMetrics, cfg.Token, cfg.PollerTimeout)
+	radiBot, err := bot.NewBot(logger, repo, redisClient, appMetrics, cfg.Token, cfg.PollerTimeout)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}

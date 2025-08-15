@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/models"
+	"github.com/UnknownOlympus/oracle/internal/models"
 	"github.com/jackc/pgx/v5"
 )
 

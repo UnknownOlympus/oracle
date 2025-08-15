@@ -3,7 +3,7 @@ package metrics_test
 import (
 	"testing"
 
-	"github.com/Houeta/radireporter-bot/internal/metrics"
+	"github.com/UnknownOlympus/oracle/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

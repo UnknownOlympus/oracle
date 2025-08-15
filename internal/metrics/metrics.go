@@ -10,6 +10,7 @@ import (
 // new users, and a histogram for database query durations.
 type Metrics struct {
 	CommandReceived  *prometheus.CounterVec   // Counter for received commands
+	CacheOps         *prometheus.CounterVec   // Counter for cache operations
 	SentMessages     *prometheus.CounterVec   // Counter for sent messages
 	NewUsers         prometheus.Counter       // Counter for new users
 	DBQueryDuration  *prometheus.HistogramVec // Histogram for database query durations
@@ -28,25 +29,29 @@ type Metrics struct {
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
 		CommandReceived: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "telegram_commands_received_total",
+			Name: "oracle_commands_received_total",
 			Help: "Total number of used commands",
 		}, []string{"command"}), // command: /start, login, logout
 		SentMessages: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-			Name: "telegram_messages_sent_total",
+			Name: "oracle_messages_sent_total",
 			Help: "Output bot activity",
 		}, []string{"type"}), // type: text, reply, error, reactions
 		NewUsers: promauto.With(reg).NewCounter(prometheus.CounterOpts{
-			Name: "telegram_new_users_total",
+			Name: "oracle_new_users_total",
 			Help: "Total number of new users via /start command",
 		}),
 		DBQueryDuration: promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "telegram_db_query_duration_seconds",
+			Name:    "oracle_db_query_duration_seconds",
 			Help:    "Duration of database queries.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"query_type"}), // query_type: 'get_employee', 'upsert_task'
 		ReportGeneration: promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
-			Name: "telegram_report_generation_duration_seconds",
+			Name: "oracle_report_generation_duration_seconds",
 			Help: "Duration of report excel generation.",
 		}, []string{"period"}), // period: last_7d, last_1m, current_1m
+		CacheOps: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Name: "oracle_cache_operations_total",
+			Help: "Total number of cache operations.",
+		}, []string{"operation", "status"}),
 	}
 }

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/models"
-	"github.com/Houeta/radireporter-bot/internal/report"
-	"github.com/Houeta/radireporter-bot/mocks" // Припускаємо, що мок тут
+	"github.com/UnknownOlympus/oracle/internal/models"
+	"github.com/UnknownOlympus/oracle/internal/report"
+	"github.com/UnknownOlympus/oracle/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

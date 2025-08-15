@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Houeta/radireporter-bot/internal/models"
-	"github.com/Houeta/radireporter-bot/internal/repository"
+	"github.com/UnknownOlympus/oracle/internal/models"
+	"github.com/UnknownOlympus/oracle/internal/repository"
 	"github.com/xuri/excelize/v2"
 )
 

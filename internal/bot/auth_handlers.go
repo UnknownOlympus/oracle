@@ -1,14 +1,17 @@
 package bot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/report"
+	"github.com/UnknownOlympus/oracle/internal/models"
+	"github.com/UnknownOlympus/oracle/internal/report"
 	"gopkg.in/telebot.v4"
 )
 
@@ -44,11 +47,30 @@ func (b *Bot) logoutHandler(ctx telebot.Context) error {
 func (b *Bot) infoHandler(ctx telebot.Context) error {
 	b.log.Info("User requested info", "user", ctx.Sender().ID)
 	b.metrics.CommandReceived.WithLabelValues("info").Inc()
+
+	userID := ctx.Sender().ID
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	cacheKey := fmt.Sprintf("oracle:info:user:%d", userID)
+	const cacheTTL = 12 * time.Hour
+
+	cachedUserJSON, err := b.redisClient.Get(timeoutCtx, cacheKey).Result()
+	if err == nil {
+		b.log.Info("Info found in cache", "user", userID, "key", cacheKey)
+		b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
+		var user models.Employee
+		if json.Unmarshal([]byte(cachedUserJSON), &user) == nil {
+			responseText := formatUserInfo(user) // Use a helper to format the text
+			b.metrics.SentMessages.WithLabelValues("text_cached").Inc()
+			return ctx.Send(responseText, telebot.ModeMarkdown)
+		}
+	}
+
+	b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
+	b.log.Info("User info not in cache, fetching from DB", "user", userID)
 	startTime := time.Now()
-	user, err := b.repo.GetEmployee(timeoutCtx, ctx.Sender().ID)
+	user, err := b.repo.GetEmployee(timeoutCtx, userID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)
@@ -56,20 +78,66 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 		return ctx.Send(ErrInternal)
 	}
 
-	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	responseText := fmt.Sprintf(`
-		🤦‍♂️ *These mortals again…*
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
+		b.log.Error("Failed to marshal user for caching", "error", err, "user", userID)
+	} else {
+		err = b.redisClient.Set(timeoutCtx, cacheKey, userJSON, cacheTTL).Err()
+		if err != nil {
+			b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
+			b.log.Error("Failed to save user to cache", "error", err, "user", userID)
+		}
+		b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
+	}
 
-		*Name:* %s
-		*Position:* %s
-		*Email:* %s
-		*Phone:* %s
-		
-		💬 Okay, I saved this somewhere… or not.
-	`,
-		user.FullName, user.Position, user.Email, user.Phone)
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	responseText := formatUserInfo(user)
 
 	return ctx.Send(responseText, telebot.ModeMarkdown)
+}
+
+// formatUserInfo its a helper function to keep the code DRY.
+func formatUserInfo(user models.Employee) string {
+	return fmt.Sprintf(`
+🤦‍♂️ *These mortals again…*
+
+*Name:* %s
+*Position:* %s
+*Email:* %s
+*Phone:* %s
+
+💬 Okay, I saved this somewhere… or not.
+`,
+		user.FullName, user.Position, user.Email, user.Phone)
+}
+
+// formatTaskDetails is a helper function for taskDetailsHandler.
+func formatTaskDetails(details *models.TaskDetails) string {
+	messageText := fmt.Sprintf(
+		"*Task details #%d*\n\n"+
+			"*Type:* %s\n"+
+			"*Created:* %s\n"+
+			"*Client Name:* %s\n"+
+			"*Address:* %s\n"+
+			"*Description:* %s\n"+
+			"*Assigned to:* %s",
+		details.ID,
+		details.Type,
+		details.CreationDate.Format("02.01.2006"),
+		details.CustomerName,
+		details.Address,
+		details.Description,
+		strings.Join(details.Executors, ", "),
+	)
+	if details.Latitude.Valid && details.Longitude.Valid {
+		mapURL := fmt.Sprintf("https://maps.google.com/?q=%f,%f", details.Latitude.Float64, details.Longitude.Float64)
+		messageText += fmt.Sprintf("\n\n[📍 Open on map](%s)", mapURL)
+	} else {
+		messageText += "\n\n📍 *Location not added yet*"
+	}
+
+	return messageText
 }
 
 // activeTasksHandler handles the request for active tasks from the user.
@@ -148,6 +216,29 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	cacheKey := fmt.Sprintf("oracle:task_details:%d", taskID)
+	const cacheTTL = 5 * time.Minute
+
+	cachedTaskJSON, err := b.redisClient.Get(timeoutCtx, cacheKey).Result()
+	if err == nil {
+		b.log.Info("Task found in cache", "task", taskID, "key", cacheKey)
+		b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
+		var details models.TaskDetails
+		if json.Unmarshal([]byte(cachedTaskJSON), &details) == nil {
+			responseText := formatTaskDetails(&details)
+			b.metrics.SentMessages.WithLabelValues("edit").Inc()
+			err = ctx.Edit(responseText, telebot.ModeMarkdown, ctx.Message().ReplyMarkup)
+			if err != nil && !errors.Is(err, telebot.ErrSameMessageContent) {
+				b.log.Error("Failed to edit message", "error", err)
+			}
+
+			return nil
+		}
+	}
+
+	b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
+	b.log.Info("Task details not in cache, fetching from DB", "task", taskID)
+
 	startTime := time.Now()
 	details, err := b.repo.GetTaskDetailsByID(timeoutCtx, taskID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
@@ -157,31 +248,21 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 		return ctx.Respond(&telebot.CallbackResponse{Text: "Error retrieving data."})
 	}
 
-	// format detail information
-	messageText := fmt.Sprintf(
-		"*Task details #%d*\n\n"+
-			"*Type:* %s\n"+
-			"*Created:* %s\n"+
-			"*Client Name:* %s\n"+
-			"*Address:* %s\n"+
-			"*Description:* %s\n"+
-			"*Assigned to:* %s",
-		details.ID,
-		details.Type,
-		details.CreationDate.Format("02.01.2006"),
-		details.CustomerName,
-		details.Address,
-		details.Description,
-		strings.Join(details.Executors, ", "),
-	)
-	if details.Latitude.Valid && details.Longitude.Valid {
-		mapURL := fmt.Sprintf("https://maps.google.com/?q=%f,%f", details.Latitude.Float64, details.Longitude.Float64)
-		messageText += fmt.Sprintf("\n\n[📍 Open on map](%s)", mapURL)
+	taskJSON, err := json.Marshal(details)
+	if err != nil {
+		b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
+		b.log.Error("Failed to marshal task details for caching", "error", err, "task", taskID)
 	} else {
-		messageText += "\n\n📍 *Location not added yet*"
+		err = b.redisClient.Set(timeoutCtx, cacheKey, taskJSON, cacheTTL).Err()
+		if err != nil {
+			b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
+			b.log.Error("Failed to save task details to cache", "error", err, "task", taskID)
+		}
+		b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
 	}
 
 	b.metrics.SentMessages.WithLabelValues("edit").Inc()
+	messageText := formatTaskDetails(details)
 	err = ctx.Edit(messageText, telebot.ModeMarkdown, ctx.Message().ReplyMarkup)
 	if err != nil && !errors.Is(err, telebot.ErrSameMessageContent) {
 		b.log.Error("Failed to edit message", "error", err)
@@ -221,49 +302,114 @@ func (b *Bot) reportHandler(ctx telebot.Context) error {
 func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 	b.metrics.CommandReceived.WithLabelValues("report").Inc()
 	b.metrics.SentMessages.WithLabelValues("respond").Inc()
-	_ = ctx.Respond(&telebot.CallbackResponse{Text: "🔧 I'll do it now!!! Wait...😩"})
+	_ = ctx.Respond(&telebot.CallbackResponse{Text: "🔧 One moment, generating your report..."})
+
 	userID := ctx.Sender().ID
 	b.log.Info("User requested report", "user", userID, "data", ctx.Callback().Unique)
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	var from, to time.Time
-	var periodMetric string
-	now := time.Now()
-
-	switch ctx.Callback().Unique {
-	case "report_period_current_month":
-		periodMetric = "current_1m"
-		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		to = from.AddDate(0, 1, 0).Add(-1 * time.Nanosecond)
-	case "report_period_last_month":
-		periodMetric = "last_1m"
-		from = time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
-		to = from.AddDate(0, 1, 0).Add(-1 * time.Nanosecond)
-	case "report_period_last_7_days":
-		periodMetric = "last_7d"
-		from = now.AddDate(0, 0, -7)
-		to = now
-	default:
+	from, to, periodMetric, err := b.parseReportPeriod(ctx)
+	if err != nil {
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Edit("💩 Unsupported time period", ctx.Message().ReplyMarkup)
 	}
 
+	cacheKey := fmt.Sprintf("oracle:report:user:%d:period:%s", userID, periodMetric)
+	if sent, _ := b.sendCachedReportIfExists(timeoutCtx, ctx, userID, cacheKey, from, to); sent {
+		return nil
+	}
+
+	return b.generateAndSendReport(timeoutCtx, ctx, userID, from, to, periodMetric, cacheKey)
+}
+
+func (b *Bot) parseReportPeriod(ctx telebot.Context) (time.Time, time.Time, string, error) {
+	now := time.Now()
+	switch ctx.Callback().Unique {
+	case "report_period_current_month":
+		from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		return from, from.AddDate(0, 1, 0).Add(-time.Nanosecond), "current_1m", nil
+	case "report_period_last_month":
+		from := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
+		return from, from.AddDate(0, 1, 0).Add(-time.Nanosecond), "last_1m", nil
+	case "report_period_last_7_days":
+		return now.AddDate(0, 0, -7), now, "last_7d", nil
+	default:
+		return time.Time{}, time.Time{}, "", errors.New("unsupported period")
+	}
+}
+
+func (b *Bot) sendCachedReportIfExists(
+	ctx context.Context,
+	tbCtx telebot.Context,
+	userID int64,
+	cacheKey string,
+	from, to time.Time,
+) (bool, error) {
+	cachedReport, err := b.redisClient.Get(ctx, cacheKey).Bytes()
+	if err != nil {
+		b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
+		return false, fmt.Errorf("failed to get report from cache: %w", err)
+	}
+
+	b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
+	b.log.InfoContext(ctx, "Report found in cache", "user", userID, "key", cacheKey)
+
+	responseText := fmt.Sprintf(
+		"💩 Your report for the period %s to %s is ready.\nJust pass it on to Tanz and leave me alone 😩",
+		from.Format("02.01.2006"),
+		to.Format("02.01.2006"),
+	)
+
+	reportFile := &telebot.Document{
+		File:     telebot.FromReader(bytes.NewReader(cachedReport)),
+		FileName: fmt.Sprintf("report_%s_%s.xlsx", from.Format("2006-01-02"), to.Format("2006-01-02")),
+		MIME:     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	}
+
+	b.metrics.SentMessages.WithLabelValues("edit").Inc()
+	_ = tbCtx.Edit(responseText, tbCtx.Message().ReplyMarkup)
+	b.metrics.SentMessages.WithLabelValues("file").Inc()
+	return true, tbCtx.Send(reportFile)
+}
+
+func (b *Bot) generateAndSendReport(
+	ctx context.Context,
+	tbCtx telebot.Context,
+	userID int64,
+	from, to time.Time,
+	periodMetric, cacheKey string,
+) error {
+	b.log.InfoContext(ctx, "Report not found in cache, generating a new one", "user", userID, "key", cacheKey)
+
 	startTime := time.Now()
-	reportBuffer, err := report.GenerateExcelReport(timeoutCtx, b.repo, userID, from, to)
+	reportBuffer, err := report.GenerateExcelReport(ctx, b.repo, userID, from, to)
 	b.metrics.ReportGeneration.WithLabelValues(periodMetric).Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		if errors.Is(err, report.ErrNoTasks) {
 			b.metrics.SentMessages.WithLabelValues("edit").Inc()
-			return ctx.Edit("💩 There are no completed tasks for the report for the selected period.",
-				ctx.Message().ReplyMarkup)
+			return tbCtx.Edit("💩 There are no completed tasks for the report for the selected period.",
+				tbCtx.Message().ReplyMarkup)
 		}
-
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		b.log.Error("Failed to generate report", "error", err, "user", userID)
-		return ctx.Edit(ErrInternal, ctx.Message().ReplyMarkup)
+		b.log.ErrorContext(ctx, "Failed to generate report", "error", err, "user", userID)
+		return tbCtx.Edit(ErrInternal, tbCtx.Message().ReplyMarkup)
 	}
+
+	const cacheTTL = 1 * time.Hour
+	if err = b.redisClient.Set(ctx, cacheKey, reportBuffer.Bytes(), cacheTTL).Err(); err != nil {
+		b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
+		b.log.ErrorContext(ctx, "Failed to save report to cache", "error", err, "key", cacheKey)
+	} else {
+		b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
+	}
+
+	responseText := fmt.Sprintf(
+		"💩 Your report for the period %s to %s is ready.\nJust pass it on to Tanz and leave me alone 😩",
+		from.Format("02.01.2006"),
+		to.Format("02.01.2006"),
+	)
 
 	reportFile := &telebot.Document{
 		File:     telebot.FromReader(reportBuffer),
@@ -271,17 +417,10 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 		MIME:     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	}
 
-	reponseText := fmt.Sprintf(
-		"💩 Your report for the period %s to %s is ready.\n"+
-			"Just pass it on to Tanz and leave me alone 😩",
-		from.Format("02.01.2006"), to.Format("02.01.2006"),
-	)
-
 	b.metrics.SentMessages.WithLabelValues("edit").Inc()
-	_ = ctx.Edit(reponseText, ctx.Message().ReplyMarkup)
-
-	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send(reportFile)
+	_ = tbCtx.Edit(responseText, tbCtx.Message().ReplyMarkup)
+	b.metrics.SentMessages.WithLabelValues("file").Inc()
+	return tbCtx.Send(reportFile)
 }
 
 // nearTasksHandler handles the user's request for nearby tasks.

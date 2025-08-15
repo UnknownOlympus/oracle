@@ -13,73 +13,120 @@ import (
 
 // statisticHandler sends a message to the user with options for statistics.
 // It prompts the user to pick which statistic they want to view.
-func (b *Bot) statisticHandler(ctx telebot.Context) error {
+func (b *Bot) statistic(ctx telebot.Context) error {
 	return ctx.Send("📈 Pick statistic what do you want", statMenu)
 }
 
 // statisticHandlerToday handles the request for today's statistics from the user.
 // It logs the user's request, generates the statistics string for the current day,
-// and sends the response back to the user. In case of an error during the
-// generation of the statistics, it sends an internal error message.
+// and sends the response back to the user.
 func (b *Bot) statisticHandlerToday(ctx telebot.Context) error {
-	b.log.Info("User requested stats", "user", ctx.Sender().ID, "duration", "day")
 	b.metrics.CommandReceived.WithLabelValues("statistic").Inc()
-	endDate := time.Now()
 
-	startTime := time.Now()
-	responseText, err := generateStatisticString(b, ctx.Sender().ID, endDate, endDate)
-	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
-	if err != nil {
-		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
-	}
+	userID := ctx.Sender().ID
 
-	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	b.log.Info("User requested stats", "user", userID, "period", "day")
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	responseText := b.processStatistic(timeoutCtx, userID, "day")
+
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
 
 // statisticHandlerMonth handles the user's request for monthly statistics.
 // It logs the request, calculates the start and end dates for the current month,
 // generates the statistics string, and sends the response back to the user.
-// If an error occurs during the generation of the statistics, it sends an internal error message.
 func (b *Bot) statisticHandlerMonth(ctx telebot.Context) error {
-	b.log.Info("User requested stats", "user", ctx.Sender().ID, "duration", "month")
 	b.metrics.CommandReceived.WithLabelValues("statistic").Inc()
-	endDate := time.Now()
-	startDate := time.Date(endDate.Year(), endDate.Month(), 1, 0, 0, 0, 0, endDate.Location())
 
-	startTime := time.Now()
-	responseText, err := generateStatisticString(b, ctx.Sender().ID, startDate, endDate)
-	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
-	if err != nil {
-		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
-	}
+	userID := ctx.Sender().ID
 
-	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	b.log.Info("User requested stats", "user", userID, "period", "month")
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	responseText := b.processStatistic(timeoutCtx, userID, "month")
+
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
 
 // statisticHandlerYear handles the statistics request for the year.
 // It logs the user's request, calculates the start and end dates for the current year,
 // generates the statistics string, and sends the response back to the user.
-// If an error occurs during the generation of the statistics string, it sends an internal error message.
 func (b *Bot) statisticHandlerYear(ctx telebot.Context) error {
-	b.log.Info("User requested stats", "user", ctx.Sender().ID, "duration", "year")
 	b.metrics.CommandReceived.WithLabelValues("statistic").Inc()
-	endDate := time.Now()
-	startDate := time.Date(endDate.Year(), time.January, 1, 0, 0, 0, 0, endDate.Location())
 
+	userID := ctx.Sender().ID
+
+	b.log.Info("User requested stats", "user", userID, "period", "year")
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	responseText := b.processStatistic(timeoutCtx, userID, "year")
+
+	return ctx.Send(responseText, telebot.ModeMarkdown)
+}
+
+// processStatistic handles the request for statistics from the user.
+// It logs the user's request, generates the statistics string for the period time,
+// and sends the response back to the user. In case of an error during the
+// generation of the statistics, it sends an internal error message.
+func (b *Bot) processStatistic(ctx context.Context, userID int64, period string) string {
+	// --- 1. Create a unique cache key ---
+	// The key includes the user ID and the period to keep it unique.
+	cacheKey := fmt.Sprintf("oracle:statistic:%d:%s", userID, period)
+	const cacheTTL = 1 * time.Hour // Statistics can be cached for a few hours
+
+	// --- 2. Try to get the statistics from Redis first ---
+	cachedStats, err := b.redisClient.Get(ctx, cacheKey).Result()
+	if err == nil {
+		// Cache HIT!
+		b.log.InfoContext(ctx, "Statistics found in cache", "user", userID, "key", cacheKey)
+		b.metrics.SentMessages.WithLabelValues("text_cached").Inc()
+		return cachedStats
+	}
+
+	// --- 3. Cache MISS - Calculate date range ---
+	var from, to time.Time
+	now := time.Now()
+
+	switch period {
+	case "day":
+		from = now
+		to = now
+	case "month":
+		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		to = now
+	case "year":
+		from = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+		to = now
+	default:
+		return "Unsupported period."
+	}
+
+	// --- 4. Generate the statistics string ---
 	startTime := time.Now()
-	responseText, err := generateStatisticString(b, ctx.Sender().ID, startDate, endDate)
+	responseText, err := generateStatisticString(b, userID, from, to)
 	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ErrInternal
 	}
 
+	// --- 5. Save the result to Redis ---
+	err = b.redisClient.Set(ctx, cacheKey, responseText, cacheTTL).Err()
+	if err != nil {
+		// Just log the error, don't block the user
+		b.log.ErrorContext(ctx, "Failed to save statistics to cache", "error", err, "key", cacheKey)
+	}
+
+	// --- 6. Send the response ---
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send(responseText, telebot.ModeMarkdown)
+	return responseText
 }
 
 // backHandler handles the event when a user returns to the bot.

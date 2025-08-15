@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/models"
+	"github.com/UnknownOlympus/oracle/internal/models"
 )
 
 type Repository struct {

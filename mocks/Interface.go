@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	models "github.com/Houeta/radireporter-bot/internal/models"
+	models "github.com/UnknownOlympus/oracle/internal/models"
 	mock "github.com/stretchr/testify/mock"
 
 	time "time"

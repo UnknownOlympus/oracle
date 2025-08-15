@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/repository"
+	"github.com/UnknownOlympus/oracle/internal/repository"
 	"gopkg.in/telebot.v4"
 	"gopkg.in/telebot.v4/react"
 )

@@ -23,16 +23,16 @@ type ActiveTask struct {
 // It includes information such as the task's ID, type, creation and closing dates,
 // description, address, customer details, and any comments associated with the task.
 type TaskDetails struct {
-	ID            int           // Unique identifier for the task
-	Type          string        // Type of the task
-	CreationDate  time.Time     // Date when the task was created
-	ClosingDate   time.Time     // Date when the task was closed
-	Description   string        // Description of the task
-	Address       string        // Address related to the task
-	CustomerName  string        // Name of the customer associated with the task
-	CustomerLogin string        // Login identifier of the customer
-	Executors     []string      // List of executors related to the task
-	Comments      []string      // List of comments related to the task
-	Latitude      pgtype.Float8 // Latitude indicates the geographical latitude of the task.
-	Longitude     pgtype.Float8 // Longitude indicates the geographical longitude of the task.
+	ID            int           `json:"id"`             // Unique identifier for the task
+	Type          string        `json:"type"`           // Type of the task
+	CreationDate  time.Time     `json:"creation_date"`  // Date when the task was created
+	ClosingDate   time.Time     `json:"closing_date"`   // Date when the task was closed
+	Description   string        `json:"description"`    // Description of the task
+	Address       string        `json:"address"`        // Address related to the task
+	CustomerName  string        `json:"customer_name"`  // Name of the customer associated with the task
+	CustomerLogin string        `json:"customer_login"` // Login identifier of the customer
+	Executors     []string      `json:"executors"`      // List of executors related to the task
+	Comments      []string      `json:"comments"`       // List of comments related to the task
+	Latitude      pgtype.Float8 `json:"latitude"`       // Latitude indicates the geographical latitude of the task.
+	Longitude     pgtype.Float8 `json:"longitude"`      // Longitude indicates the geographical longitude of the task.
 }

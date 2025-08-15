@@ -5,17 +5,19 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/Houeta/radireporter-bot/internal/metrics"
-	"github.com/Houeta/radireporter-bot/internal/repository"
+	"github.com/UnknownOlympus/oracle/internal/metrics"
+	"github.com/UnknownOlympus/oracle/internal/repository"
+	"github.com/redis/go-redis/v9"
 	"gopkg.in/telebot.v4"
 )
 
 // Bot contains the bot API instance and other information.
 type Bot struct {
-	bot     *telebot.Bot
-	log     *slog.Logger
-	repo    repository.Interface
-	metrics *metrics.Metrics
+	bot         *telebot.Bot
+	log         *slog.Logger
+	repo        repository.Interface
+	metrics     *metrics.Metrics
+	redisClient *redis.Client
 }
 
 var (
@@ -69,6 +71,7 @@ var (
 func NewBot(
 	log *slog.Logger,
 	repo repository.Interface,
+	redisClient *redis.Client,
 	metrics *metrics.Metrics,
 	token string,
 	poller time.Duration,
@@ -82,7 +85,7 @@ func NewBot(
 	}
 	log.Info("Authorized on account", "account", bot.Me.Username)
 
-	botInstance := &Bot{bot: bot, log: log, repo: repo, metrics: metrics}
+	botInstance := &Bot{bot: bot, log: log, repo: repo, metrics: metrics, redisClient: redisClient}
 
 	mainMenu.Reply(
 		mainMenu.Row(btnLogin),
@@ -143,7 +146,7 @@ func (b *Bot) registerRoutes() {
 	authGroup.Handle(&btnReportPeriod7Days, b.generatorReportHandler)
 
 	authGroup.Handle(&btnActiveTasks, b.activeTasksHandler)
-	authGroup.Handle(&btnStatistic, b.statisticHandler)
+	authGroup.Handle(&btnStatistic, b.statistic)
 	authGroup.Handle(&btnLogout, b.logoutHandler)
 	authGroup.Handle(&btnInfo, b.infoHandler)
 
