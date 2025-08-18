@@ -109,18 +109,20 @@ func (r *Repository) GetCompletedTasksByExecutor(
 			t.closing_date,
 			t.description,
 			t.address,
-			t.customer_name,
-			t.customer_login,
+			ARRAY_AGG(DISTINCT c.name) FILTER (WHERE c.name IS NOT NULL) AS customer_names,
 			t.comments
 		FROM tasks t
 		JOIN task_executors te ON t.task_id = te.task_id
 		JOIN bot_users bu ON te.executor_id = bu.employee_id
 		JOIN task_types tt ON t.task_type_id = tt.type_id
+		LEFT JOIN task_customers tc ON t.task_id = tc.task_id
+		LEFT JOIN customers c ON tc.customer_id = c.id
 		WHERE
 			bu.telegram_id = $1
 			AND t.closing_date >= $2
 			AND t.closing_date <= $3
 			AND t.is_closed = TRUE
+		GROUP BY t.task_id, tt.type_name
 		ORDER BY tt.type_name, t.creation_date;
 	`
 	rows, err := r.db.Query(ctx, query, telegramID, from, to)
@@ -133,7 +135,7 @@ func (r *Repository) GetCompletedTasksByExecutor(
 	for rows.Next() {
 		var task models.TaskDetails
 		if err = rows.Scan(&task.ID, &task.Type, &task.CreationDate, &task.ClosingDate, &task.Description,
-			&task.Address, &task.CustomerName, &task.CustomerLogin, &task.Comments,
+			&task.Address, &task.CustomerNames, &task.Comments,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan completed task row: %w", err)
 		}
@@ -168,7 +170,7 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 			t.creation_date,
 			t.description,
 			t.address,
-			t.customer_name,
+			ARRAY_AGG(DISTINCT c.name) FILTER (WHERE c.name IS NOT NULL) AS customer_names,
 			t.comments,
 			t.latitude,
 			t.longitude,
@@ -177,6 +179,8 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 		JOIN task_types tt ON t.task_type_id = tt.type_id
 		LEFT JOIN task_executors te ON t.task_id = te.task_id
 		LEFT JOIN employees e ON te.executor_id = e.id
+		LEFT JOIN task_customers tc ON t.task_id = tc.task_id
+		LEFT JOIN customers c ON tc.customer_id = c.id
 		WHERE t.task_id = $1
 		GROUP BY t.task_id, tt.type_name;
 	`
@@ -187,7 +191,7 @@ func (r *Repository) GetTaskDetailsByID(ctx context.Context, taskID int) (*model
 		&details.CreationDate,
 		&details.Description,
 		&details.Address,
-		&details.CustomerName,
+		&details.CustomerNames,
 		&details.Comments,
 		&details.Latitude,
 		&details.Longitude,

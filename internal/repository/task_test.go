@@ -225,18 +225,20 @@ func TestGetCompletedTasksByExecutor(t *testing.T) {
 			t.closing_date,
 			t.description,
 			t.address,
-			t.customer_name,
-			t.customer_login,
+			ARRAY_AGG(DISTINCT c.name) FILTER (WHERE c.name IS NOT NULL) AS customer_names,
 			t.comments
 		FROM tasks t
 		JOIN task_executors te ON t.task_id = te.task_id
 		JOIN bot_users bu ON te.executor_id = bu.employee_id
 		JOIN task_types tt ON t.task_type_id = tt.type_id
+		LEFT JOIN task_customers tc ON t.task_id = tc.task_id
+		LEFT JOIN customers c ON tc.customer_id = c.id
 		WHERE
 			bu.telegram_id = $1
 			AND t.closing_date >= $2
 			AND t.closing_date <= $3
 			AND t.is_closed = TRUE
+		GROUP BY t.task_id, tt.type_name
 		ORDER BY tt.type_name, t.creation_date;
 	`
 
@@ -271,10 +273,10 @@ func TestGetCompletedTasksByExecutor(t *testing.T) {
 			WillReturnRows(
 				pgxmock.NewRows([]string{
 					"task_id", "type_name", "creation_date", "closing_date", "description",
-					"address", "customer_name", "customer_login", "comments",
+					"address", "customer_names", "comments",
 				}).
 					AddRow("invalid_id", "repair", time.Now(), time.Now(), "descr",
-						"test addr", "test user", "testusr", []string{"1 comm", "2 comm"}),
+						"test addr", []string{"test user"}, []string{"1 comm", "2 comm"}),
 			)
 
 		_, err = repo.GetCompletedTasksByExecutor(ctx, telegramID, from, to)
@@ -296,10 +298,10 @@ func TestGetCompletedTasksByExecutor(t *testing.T) {
 			WillReturnRows(
 				pgxmock.NewRows([]string{
 					"task_id", "type_name", "creation_date", "closing_date", "description",
-					"address", "customer_name", "customer_login", "comments",
+					"address", "customer_names", "comments",
 				}).
 					AddRow(12345, "repair", time.Now(), time.Now(), "descr",
-						"test addr", "test user", "testusr", []string{"1 comm", "2 comm"}).
+						"test addr", []string{"test user"}, []string{"1 comm", "2 comm"}).
 					RowError(1, assert.AnError),
 			)
 
@@ -324,10 +326,10 @@ func TestGetCompletedTasksByExecutor(t *testing.T) {
 			WillReturnRows(
 				pgxmock.NewRows([]string{
 					"task_id", "type_name", "creation_date", "closing_date", "description",
-					"address", "customer_name", "customer_login", "comments",
+					"address", "customer_names", "comments",
 				}).
 					AddRow(12345, "repair", now, now, "descr",
-						"test addr", "test user", "testusr", []string{"1 comm", "2 comm"}),
+						"test addr", []string{"test user"}, []string{"1 comm", "2 comm"}),
 			)
 
 		tasks, err := repo.GetCompletedTasksByExecutor(ctx, telegramID, from, to)
@@ -340,8 +342,7 @@ func TestGetCompletedTasksByExecutor(t *testing.T) {
 		assert.Equal(t, now, task.ClosingDate)
 		assert.Equal(t, "descr", task.Description)
 		assert.Equal(t, "test addr", task.Address)
-		assert.Equal(t, "test user", task.CustomerName)
-		assert.Equal(t, "testusr", task.CustomerLogin)
+		assert.Equal(t, []string{"test user"}, task.CustomerNames)
 		assert.Equal(t, []string{"1 comm", "2 comm"}, task.Comments)
 	})
 }
@@ -352,23 +353,25 @@ func TestGetTaskDetailsByID(t *testing.T) {
 	taskID := 12345
 	now := time.Now()
 	query := `
-	SELECT
-		t.task_id,
-		tt.type_name,
-		t.creation_date,
-		t.description,
-		t.address,
-		t.customer_name,
-		t.comments,
-		t.latitude,
-		t.longitude,
-		COALESCE(ARRAY_AGG(e.shortname) FILTER (WHERE e.shortname IS NOT NULL), '{}') as executors
-	FROM tasks t
-	JOIN task_types tt ON t.task_type_id = tt.type_id
-	LEFT JOIN task_executors te ON t.task_id = te.task_id
-	LEFT JOIN employees e ON te.executor_id = e.id
-	WHERE t.task_id = $1
-	GROUP BY t.task_id, tt.type_name;
+		SELECT
+			t.task_id,
+			tt.type_name,
+			t.creation_date,
+			t.description,
+			t.address,
+			ARRAY_AGG(DISTINCT c.name) FILTER (WHERE c.name IS NOT NULL) AS customer_names,
+			t.comments,
+			t.latitude,
+			t.longitude,
+			COALESCE(ARRAY_AGG(e.shortname) FILTER (WHERE e.shortname IS NOT NULL), '{}') as executors
+		FROM tasks t
+		JOIN task_types tt ON t.task_type_id = tt.type_id
+		LEFT JOIN task_executors te ON t.task_id = te.task_id
+		LEFT JOIN employees e ON te.executor_id = e.id
+		LEFT JOIN task_customers tc ON t.task_id = tc.task_id
+		LEFT JOIN customers c ON tc.customer_id = c.id
+		WHERE t.task_id = $1
+		GROUP BY t.task_id, tt.type_name;
 	`
 
 	t.Run("error - query task details", func(t *testing.T) {
@@ -422,9 +425,9 @@ func TestGetTaskDetailsByID(t *testing.T) {
 			WithArgs(taskID).
 			WillReturnRows(mock.NewRows([]string{
 				"task_id", "type_name", "creation_date", "description",
-				"address", "customer_name", "comments", "latitude", "longitude", "executors",
+				"address", "customer_names", "comments", "latitude", "longitude", "executors",
 			}).
-				AddRow(123, "type", now, "descr", "addr", "test user", []string{"1", "2"}, 12.345, 23.456, []string{"test", "executor 1"}),
+				AddRow(123, "type", now, "descr", "addr", []string{"test user"}, []string{"1", "2"}, 12.345, 23.456, []string{"test", "executor 1"}),
 			)
 
 		task, err := repo.GetTaskDetailsByID(ctx, taskID)
@@ -435,7 +438,7 @@ func TestGetTaskDetailsByID(t *testing.T) {
 		assert.Equal(t, now, task.CreationDate)
 		assert.Equal(t, "descr", task.Description)
 		assert.Equal(t, "addr", task.Address)
-		assert.Equal(t, "test user", task.CustomerName)
+		assert.Equal(t, []string{"test user"}, task.CustomerNames)
 		assert.Equal(t, []string{"1", "2"}, task.Comments)
 		assert.InEpsilon(t, 12.345, task.Latitude.Float64, 0.001)
 		assert.InEpsilon(t, 23.456, task.Longitude.Float64, 0.001)

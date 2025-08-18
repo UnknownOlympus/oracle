@@ -188,12 +188,13 @@ func (g *Generator) setupSheet(sheetName string, taskCount int) error {
 // It takes the sheet name, the row number where the data should be added,
 // and the task details as parameters. If the operation fails, it returns an error.
 func (g *Generator) addRow(sheetName string, rowNum int, task models.TaskDetails) error {
+	customerNames := strings.Join(task.CustomerNames, ", ")
 	rowData := []interface{}{
 		task.ID,
 		task.CreationDate.Format("02.01.2006"),
 		task.Description,
 		task.Address,
-		task.CustomerName,
+		customerNames,
 	}
 	cell, _ := excelize.CoordinatesToCellName(1, rowNum)
 

@@ -117,19 +117,24 @@ func formatTaskDetails(details *models.TaskDetails) string {
 	messageText := fmt.Sprintf(
 		"*Task details #%d*\n\n"+
 			"*Type:* %s\n"+
-			"*Created:* %s\n"+
-			"*Client Name:* %s\n"+
-			"*Address:* %s\n"+
-			"*Description:* %s\n"+
-			"*Assigned to:* %s",
+			"*Created:* %s",
 		details.ID,
 		details.Type,
 		details.CreationDate.Format("02.01.2006"),
-		details.CustomerName,
+	)
+	if len(details.CustomerNames) > 0 {
+		messageText += fmt.Sprintf("\n*Client Name:* %s", strings.Join(details.CustomerNames, ", "))
+	}
+	suffixText := fmt.Sprintf(
+		"\n*Address:* %s\n"+
+			"*Description:* %s\n"+
+			"*Assigned to:* %s",
 		details.Address,
 		details.Description,
 		strings.Join(details.Executors, ", "),
 	)
+	messageText += suffixText
+
 	if details.Latitude.Valid && details.Longitude.Valid {
 		mapURL := fmt.Sprintf("https://maps.google.com/?q=%f,%f", details.Latitude.Float64, details.Longitude.Float64)
 		messageText += fmt.Sprintf("\n\n[📍 Open on map](%s)", mapURL)
@@ -436,7 +441,7 @@ func (b *Bot) nearTasksHandler(ctx telebot.Context) error {
 
 	b.metrics.SentMessages.WithLabelValues("reply").Inc()
 	return ctx.Reply(
-		"🧳 I'm ready, but first provide your geolocation\n\n*NOTE:* This feature is in beta testing\\.\nIf you see any errors: please report them to your admin\\.",
+		"🧳 I'm ready, but first provide your geolocation",
 		nearMenu,
 		telebot.ModeMarkdownV2,
 	)
