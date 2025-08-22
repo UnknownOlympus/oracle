@@ -312,7 +312,7 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 	userID := ctx.Sender().ID
 	b.log.Info("User requested report", "user", userID, "data", ctx.Callback().Unique)
 
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	from, to, periodMetric, err := b.parseReportPeriod(ctx)
@@ -389,7 +389,11 @@ func (b *Bot) generateAndSendReport(
 	b.log.InfoContext(ctx, "Report not found in cache, generating a new one", "user", userID, "key", cacheKey)
 
 	startTime := time.Now()
-	reportBuffer, err := report.GenerateExcelReport(ctx, b.repo, userID, from, to)
+	excelRows, err := b.formatExcelRows(ctx, userID, from, to)
+	if err != nil {
+		b.log.ErrorContext(ctx, "Failed to format excel rows for report generator", "error", err)
+	}
+	reportBuffer, err := report.GenerateExcelReport(excelRows)
 	b.metrics.ReportGeneration.WithLabelValues(periodMetric).Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		if errors.Is(err, report.ErrNoTasks) {

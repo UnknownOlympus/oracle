@@ -8,6 +8,7 @@ import (
 
 	"github.com/UnknownOlympus/oracle/internal/models"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // GetTaskSummary retrieves a summary of tasks for a specific user identified by telegramID
@@ -262,4 +263,49 @@ func (r *Repository) GetTasksInRadius(ctx context.Context, lat, lng float32, rad
 	}
 
 	return tasks, nil
+}
+
+// GetCustomersByTaskID retrieves a list of customers associated with a specific task ID.
+// It executes a SQL query to select customer details from the database, including
+// external ID, name, and login. If the task ID is valid, it returns a slice of
+// models.Customer and an error if any occurs during the process.
+//
+// Parameters:
+//   - ctx: The context for the database operation.
+//   - taskID: The ID of the task for which to retrieve associated customers.
+//
+// Returns:
+//   - A slice of models.Customer containing the customer details.
+//   - An error if the operation fails.
+func (r *Repository) GetCustomersByTaskID(ctx context.Context, taskID int64) ([]models.Customer, error) {
+	query := `
+		SELECT external_id, name, login
+		FROM customers c
+		LEFT JOIN task_customers tc ON tc.customer_id = c.id
+		WHERE tc.task_id = $1;
+	`
+	rows, err := r.db.Query(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select customers to assigned task %d: %w", taskID, err)
+	}
+	defer rows.Close()
+
+	var customers []models.Customer
+	for rows.Next() {
+		var customer models.Customer
+		var customerID pgtype.Int8
+		if err = rows.Scan(&customerID, &customer.Fullname, &customer.Login); err != nil {
+			return nil, fmt.Errorf("failed to scan customer row: %w", err)
+		}
+		if customerID.Valid {
+			customer.ID = customerID.Int64
+		}
+		customers = append(customers, customer)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
+	}
+
+	return customers, nil
 }
