@@ -4,6 +4,7 @@ go 1.24.5
 
 require (
 	github.com/UnknownOlympus/hermes v0.0.0-20250814141435-552bfa8cfd4b
+	github.com/UnknownOlympus/olympus-protos v0.3.0
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/joho/godotenv v1.5.1
 	github.com/pashagolub/pgxmock/v4 v4.8.0
@@ -13,6 +14,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.38.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.38.0
 	github.com/xuri/excelize/v2 v2.9.1
+	google.golang.org/grpc v1.74.2
 	gopkg.in/telebot.v4 v4.0.0-beta.5
 )
 

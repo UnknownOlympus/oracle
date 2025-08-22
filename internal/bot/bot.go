@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/UnknownOlympus/olympus-protos/gen/go/scraper/olympus"
 	"github.com/UnknownOlympus/oracle/internal/metrics"
 	"github.com/UnknownOlympus/oracle/internal/repository"
 	"github.com/redis/go-redis/v9"
@@ -13,11 +14,12 @@ import (
 
 // Bot contains the bot API instance and other information.
 type Bot struct {
-	bot         *telebot.Bot
-	log         *slog.Logger
-	repo        repository.Interface
-	metrics     *metrics.Metrics
-	redisClient *redis.Client
+	bot          *telebot.Bot
+	log          *slog.Logger
+	repo         repository.Interface
+	metrics      *metrics.Metrics
+	redisClient  *redis.Client
+	hermesClient olympus.ScraperServiceClient
 }
 
 var (
@@ -72,6 +74,7 @@ func NewBot(
 	log *slog.Logger,
 	repo repository.Interface,
 	redisClient *redis.Client,
+	hermesClient olympus.ScraperServiceClient,
 	metrics *metrics.Metrics,
 	token string,
 	poller time.Duration,
@@ -85,7 +88,14 @@ func NewBot(
 	}
 	log.Info("Authorized on account", "account", bot.Me.Username)
 
-	botInstance := &Bot{bot: bot, log: log, repo: repo, metrics: metrics, redisClient: redisClient}
+	botInstance := &Bot{
+		bot:          bot,
+		log:          log,
+		repo:         repo,
+		metrics:      metrics,
+		redisClient:  redisClient,
+		hermesClient: hermesClient,
+	}
 
 	mainMenu.Reply(
 		mainMenu.Row(btnLogin),

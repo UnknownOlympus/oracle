@@ -565,3 +565,128 @@ func TestGetTasksInRadius(t *testing.T) {
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }
+
+func TestGetCustomersByTaskID(t *testing.T) {
+	ctx := t.Context()
+	taskID := int64(123456)
+	query := `
+		SELECT external_id, name, login
+		FROM customers c
+		LEFT JOIN task_customers tc ON tc.customer_id = c.id
+		WHERE tc.task_id = $1;
+	`
+
+	t.Run("error - query error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WithArgs(taskID).
+			WillReturnError(assert.AnError)
+
+		_, err = repo.GetCustomersByTaskID(ctx, taskID)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to select customers")
+		require.ErrorIs(t, err, assert.AnError)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - scan customers tasks", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WithArgs(taskID).
+			WillReturnRows(
+				pgxmock.NewRows([]string{
+					"external_id", "name", "login",
+				}).
+					AddRow("123456", "john doe", []int{1, 2, 3}))
+
+		_, err = repo.GetCustomersByTaskID(ctx, taskID)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to scan customer row")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - rows error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(taskID).
+			WillReturnRows(
+				pgxmock.NewRows([]string{
+					"external_id", "name", "login",
+				}).
+					AddRow(int64(123456), "John Doe", "johnd").
+					RowError(1, assert.AnError),
+			)
+
+		_, err = repo.GetCustomersByTaskID(ctx, taskID)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to read rows")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("success - get customer with valid ID", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WithArgs(taskID).
+			WillReturnRows(
+				pgxmock.NewRows([]string{
+					"external_id", "name", "login",
+				}).
+					AddRow(int64(123456), "John Doe", "johnd"),
+			)
+
+		customers, err := repo.GetCustomersByTaskID(ctx, taskID)
+
+		require.NoError(t, err)
+		customer := customers[0]
+		assert.Equal(t, taskID, customer.ID)
+		assert.Equal(t, "John Doe", customer.Fullname)
+		assert.Equal(t, "johnd", customer.Login)
+	})
+
+	t.Run("success - get customer with empty ID", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WithArgs(taskID).
+			WillReturnRows(
+				pgxmock.NewRows([]string{
+					"external_id", "name", "login",
+				}).
+					AddRow(nil, "John Doe", "johnd"),
+			)
+
+		customers, err := repo.GetCustomersByTaskID(ctx, taskID)
+
+		require.NoError(t, err)
+		customer := customers[0]
+		assert.Equal(t, int64(0), customer.ID)
+		assert.Equal(t, "John Doe", customer.Fullname)
+		assert.Equal(t, "johnd", customer.Login)
+	})
+}

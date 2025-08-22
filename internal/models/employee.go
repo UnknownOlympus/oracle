@@ -14,3 +14,13 @@ type Employee struct {
 	Phone     string    `json:"phone"`      // Phone number of the employee
 	CreatedAt time.Time `json:"created_at"` // Timestamp of when the employee record was created
 }
+
+// Customer represents an individual client in the system.
+type Customer struct {
+	ID       int64  `json:"id"`       // Unique identifier for the customer
+	Fullname string `json:"fullname"` // Full name of the customer
+	Login    string `json:"login"`    // Username of the customer
+	Contract string `json:"contract"` // Contract ID og the customer
+	Address  string `json:"address"`  // Address which binded to user
+	Tariff   string `json:"tariff"`   // Tariff is the current tariff of the customer
+}
