@@ -48,8 +48,8 @@ func MustLoad() *Config {
 			Password: os.Getenv("DB_PASSWORD"),
 			Name:     os.Getenv("DB_NAME"),
 		},
-		RedisAddr:  os.Getenv("REDIS_ADDR"),
-		HermesAddr: os.Getenv("HERMES_ADDR"),
+		RedisAddr:  os.Getenv("REDIS_ADDRESS"),
+		HermesAddr: os.Getenv("HERMES_ADDRESS"),
 	}
 }
 
