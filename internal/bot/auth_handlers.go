@@ -134,6 +134,9 @@ func formatTaskDetails(details *models.TaskDetails) string {
 		strings.Join(details.Executors, ", "),
 	)
 	messageText += suffixText
+	if len(details.Comments) > 0 {
+		messageText += fmt.Sprintf("\n*Comments:*\n- %s", strings.Join(details.Comments, ";\n- "))
+	}
 
 	if details.Latitude.Valid && details.Longitude.Valid {
 		mapURL := fmt.Sprintf("https://maps.google.com/?q=%f,%f", details.Latitude.Float64, details.Longitude.Float64)
