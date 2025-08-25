@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/UnknownOlympus/olympus-protos/gen/go/scraper/olympus"
 	"github.com/UnknownOlympus/oracle/internal/models"
 	"github.com/UnknownOlympus/oracle/internal/report"
+	"github.com/redis/go-redis/v9"
 	"gopkg.in/telebot.v4"
 )
 
@@ -24,7 +26,7 @@ func (b *Bot) logoutHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	delete(userStates, userID)
+	b.stateManager.Get(userID)
 	b.log.Info("User logged out", "user", userID)
 	b.metrics.CommandReceived.WithLabelValues("logout").Inc()
 
@@ -197,86 +199,123 @@ func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 	return ctx.Send("Here is a list of your active tasks:", menu)
 }
 
-// taskDetailsHandler handles the request for task details based on the task ID provided in the callback context.
-// It retrieves the task details from the repository and formats them into a message.
-// If the task ID is invalid or if there is an error retrieving the details, it logs the error and responds accordingly.
-// The function also edits the original message with the formatted task details.
-//
-// Parameters:
-//   - ctx: The telebot context containing the callback data and user information.
-//
-// Returns:
-//   - error: Returns an error if there is an issue processing the request or editing the message.
+// taskDetailsHandler now acts as a high-level orchestrator.
 func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 	b.metrics.CommandReceived.WithLabelValues("task_details").Inc()
 	taskID, err := strconv.Atoi(ctx.Data())
 	if err != nil {
 		b.log.Error("Invalid task ID in callback", "error", err, "data", ctx.Data())
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		if err = ctx.Respond(); err != nil {
-			b.log.Error("Failed to send respond to callback", "error", err)
-		}
+		return ctx.Send(ErrInternal)
 	}
 
 	userID := ctx.Sender().ID
 	b.log.Info("User requested task details", "user", userID, "taskID", taskID)
 
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	tCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	cacheKey := fmt.Sprintf("oracle:task_details:%d", taskID)
-	const cacheTTL = 5 * time.Minute
-
-	cachedTaskJSON, err := b.redisClient.Get(timeoutCtx, cacheKey).Result()
-	if err == nil {
-		b.log.Info("Task found in cache", "task", taskID, "key", cacheKey)
-		b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
-		var details models.TaskDetails
-		if json.Unmarshal([]byte(cachedTaskJSON), &details) == nil {
-			responseText := formatTaskDetails(&details)
-			b.metrics.SentMessages.WithLabelValues("edit").Inc()
-			err = ctx.Edit(responseText, telebot.ModeMarkdown, ctx.Message().ReplyMarkup)
-			if err != nil && !errors.Is(err, telebot.ErrSameMessageContent) {
-				b.log.Error("Failed to edit message", "error", err)
-			}
-
-			return nil
-		}
-	}
-
-	b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
-	b.log.Info("Task details not in cache, fetching from DB", "task", taskID)
-
-	startTime := time.Now()
-	details, err := b.repo.GetTaskDetailsByID(timeoutCtx, taskID)
-	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
+	// 1. Get the task details (from cache or DB).
+	details, err := b.getTaskDetails(tCtx, taskID)
 	if err != nil {
-		b.log.Error("Failed to get task details", "error", err, "taskID", taskID)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Respond(&telebot.CallbackResponse{Text: "Error retrieving data."})
 	}
 
-	taskJSON, err := json.Marshal(details)
+	// 2. Build the keyboard for the response.
+	newMarkup, err := b.buildTaskKeyboard(tCtx, userID, taskID)
 	if err != nil {
-		b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
-		b.log.Error("Failed to marshal task details for caching", "error", err, "task", taskID)
-	} else {
-		err = b.redisClient.Set(timeoutCtx, cacheKey, taskJSON, cacheTTL).Err()
-		if err != nil {
-			b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
-			b.log.Error("Failed to save task details to cache", "error", err, "task", taskID)
-		}
-		b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		b.log.Error("Failed to build task keyboard", "error", err)
+		return ctx.Send(ErrInternal)
 	}
 
-	b.metrics.SentMessages.WithLabelValues("edit").Inc()
+	// 3. Format and send the final message.
 	messageText := formatTaskDetails(details)
-	err = ctx.Edit(messageText, telebot.ModeMarkdown, ctx.Message().ReplyMarkup)
+	return b.sendOrEditMessage(ctx, messageText, newMarkup)
+}
+
+// buildTaskKeyboard encapsulates all logic for creating the keyboard.
+func (b *Bot) buildTaskKeyboard(ctx context.Context, userID int64, currentTaskID int) (*telebot.ReplyMarkup, error) {
+	newMarkup := &telebot.ReplyMarkup{}
+
+	startTime := time.Now()
+	activeTasks, err := b.repo.GetActiveTasksByExecutor(ctx, userID)
+	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active tasks for keyboard: %w", err)
+	}
+
+	addCommentButton := telebot.InlineButton{
+		Unique: "leave_comment",
+		Text:   "💬 Leave a comment",
+		Data:   strconv.Itoa(currentTaskID),
+	}
+	rows := [][]telebot.InlineButton{{addCommentButton}}
+
+	taskButtons := make([]telebot.InlineButton, 0, 3)
+	for idx, task := range activeTasks {
+		btn := telebot.InlineButton{
+			Unique: "task_details",
+			Text:   fmt.Sprintf("#%d", task.ID),
+			Data:   strconv.Itoa(task.ID),
+		}
+		taskButtons = append(taskButtons, btn)
+		if (idx+1)%3 == 0 || idx == len(activeTasks)-1 {
+			rows = append(rows, taskButtons)
+			taskButtons = nil
+		}
+	}
+	newMarkup.InlineKeyboard = rows
+	return newMarkup, nil
+}
+
+// getTaskDetails handles the logic of fetching from cache or the database.
+func (b *Bot) getTaskDetails(ctx context.Context, taskID int) (*models.TaskDetails, error) {
+	cacheKey := fmt.Sprintf("oracle:task_details:%d", taskID)
+	const cacheTTL = 5 * time.Minute
+
+	cachedTaskJSON, err := b.redisClient.Get(ctx, cacheKey).Result()
+	if err == nil {
+		b.log.InfoContext(ctx, "Task found in cache", "task", taskID)
+		b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
+		var details models.TaskDetails
+		if json.Unmarshal([]byte(cachedTaskJSON), &details) == nil {
+			return &details, nil
+		}
+	}
+
+	b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
+	b.log.InfoContext(ctx, "Task details not in cache, fetching from DB", "task", taskID)
+
+	details, err := b.repo.GetTaskDetailsByID(ctx, taskID)
+	if err != nil {
+		b.log.ErrorContext(ctx, "Failed to get task details", "error", err, "taskID", taskID)
+		return nil, fmt.Errorf("failed to get task details: %w", err)
+	}
+
+	taskJSON, err := json.Marshal(details)
+	if err == nil {
+		err = b.redisClient.Set(ctx, cacheKey, taskJSON, cacheTTL).Err()
+		if err != nil {
+			b.metrics.CacheOps.WithLabelValues("set", "error").Inc()
+			b.log.ErrorContext(ctx, "Failed to save task details to cache", "error", err)
+		} else {
+			b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
+		}
+	}
+
+	return details, nil
+}
+
+// sendOrEditMessage handles the final step of sending the response.
+func (b *Bot) sendOrEditMessage(ctx telebot.Context, text string, markup *telebot.ReplyMarkup) error {
+	b.metrics.SentMessages.WithLabelValues("edit").Inc()
+	err := ctx.Edit(text, telebot.ModeMarkdown, markup)
 	if err != nil && !errors.Is(err, telebot.ErrSameMessageContent) {
 		b.log.Error("Failed to edit message", "error", err)
 	}
-
-	return nil
+	return err
 }
 
 // reportHandler handles the report request from the user. It presents the user with
@@ -330,6 +369,24 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 	}
 
 	return b.generateAndSendReport(timeoutCtx, ctx, userID, from, to, periodMetric, cacheKey)
+}
+
+func (b *Bot) addCommentHandler(ctx telebot.Context) error {
+	b.metrics.CommandReceived.WithLabelValues("leave_comment").Inc()
+	userID := ctx.Sender().ID
+	taskID, err := strconv.Atoi(ctx.Data())
+	if err != nil {
+		b.log.Error("Invalid task ID in callback", "error", err, "data", ctx.Data())
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		if err = ctx.Respond(); err != nil {
+			b.log.Error("Failed to send respond to callback", "error", err)
+		}
+	}
+
+	b.stateManager.Set(userID, UserState{WaitingFor: "comment", TaskID: taskID})
+
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	return ctx.Send("✍🏼 Please send the text of your comment.")
 }
 
 func (b *Bot) parseReportPeriod(ctx telebot.Context) (time.Time, time.Time, string, error) {
@@ -444,7 +501,7 @@ func (b *Bot) nearTasksHandler(ctx telebot.Context) error {
 	b.log.Info("User requested near tasks", "user", ctx.Sender().ID)
 	b.metrics.CommandReceived.WithLabelValues("near").Inc()
 
-	userStates[ctx.Sender().ID] = stateAwaitingLocation
+	b.stateManager.Set(ctx.Sender().ID, UserState{WaitingFor: stateAwaitingLocation})
 
 	b.metrics.SentMessages.WithLabelValues("reply").Inc()
 	return ctx.Reply(
@@ -452,4 +509,97 @@ func (b *Bot) nearTasksHandler(ctx telebot.Context) error {
 		nearMenu,
 		telebot.ModeMarkdownV2,
 	)
+}
+
+// commentAcceptHandler - final message sending.
+func (b *Bot) commentAcceptHandler(ctx telebot.Context) error {
+	b.log.Info("User requested accept comment", "user", ctx.Sender().ID)
+	b.metrics.CommandReceived.WithLabelValues("comment_accept").Inc()
+	_ = ctx.Respond()
+	ctxBack := context.Background()
+
+	parts := strings.Split(ctx.Data(), "|")
+	taskID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		b.log.Error("Invalid task ID in callback", "error", err, "data", ctx.Data())
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		if err = ctx.Respond(); err != nil {
+			b.log.Error("Failed to send respond to callback", "error", err)
+		}
+	}
+
+	cacheKey := fmt.Sprintf("oracle:comment_confirm:%s", parts[1])
+	commentText, err := b.redisClient.Get(ctxBack, cacheKey).Result()
+	if err != nil {
+		b.log.Warn("Could not find comment in condirmation cache", "error", err, "key", cacheKey)
+		return ctx.Edit("⌛ Confirmation expired. Please try again.")
+	}
+
+	b.redisClient.Del(ctxBack, cacheKey)
+
+	startTime := time.Now()
+	user, err := b.repo.GetEmployee(ctxBack, ctx.Sender().ID)
+	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
+	if err != nil {
+		b.log.Error("Failed to get employee data", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return ctx.Send(ErrInternal)
+	}
+
+	resp, err := b.hermesClient.AddComment(
+		ctxBack,
+		&olympus.AddCommentRequest{TaskId: taskID, Author: user.ShortName, Text: commentText},
+	)
+	if err != nil {
+		b.log.Error("Failed to get response from Hermes", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return ctx.Send(ErrInternal)
+	}
+
+	go b.updateTaskCommentsInCache(context.Background(), taskID, resp.GetComments())
+
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	return ctx.Edit("✅ Comment added successfully.")
+}
+
+// commentDeclineHandler - cancel.
+func (b *Bot) commentDeclineHandler(ctx telebot.Context) error {
+	b.log.Info("User requested decline comment", "user", ctx.Sender().ID)
+	b.metrics.CommandReceived.WithLabelValues("comment_declined").Inc()
+	b.metrics.SentMessages.WithLabelValues("edit").Inc()
+	return ctx.Edit("❌ Operation canceled.")
+}
+
+func (b *Bot) updateTaskCommentsInCache(ctx context.Context, taskID int64, newComments []string) {
+	cacheKey := fmt.Sprintf("oracle:task_details:%d", taskID)
+	log := b.log.With("op", "updateTaskCache", "key", cacheKey)
+
+	cachedTaskJSON, err := b.redisClient.Get(ctx, cacheKey).Result()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			log.ErrorContext(ctx, "Failed to get task from cache for update", "error", err)
+		}
+		return
+	}
+
+	var taskDetails models.TaskDetails
+	if err = json.Unmarshal([]byte(cachedTaskJSON), &taskDetails); err != nil {
+		log.ErrorContext(ctx, "Failed to unmarshal cached task for update", "error", err)
+		return
+	}
+
+	taskDetails.Comments = newComments
+
+	updatedTaskJSON, err := json.Marshal(taskDetails)
+	if err != nil {
+		log.ErrorContext(ctx, "Failed to marshal updated task for cache", "error", err)
+		return
+	}
+
+	const cacheTTL = 5 * time.Minute
+	if err = b.redisClient.Set(ctx, cacheKey, updatedTaskJSON, cacheTTL).Err(); err != nil {
+		log.ErrorContext(ctx, "Failed to write updated task back to cache", "error", err)
+	} else {
+		log.InfoContext(ctx, "Successfully updated task comments in cache")
+	}
 }
