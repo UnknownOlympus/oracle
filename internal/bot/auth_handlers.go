@@ -486,6 +486,7 @@ func (b *Bot) generateAndSendReport(
 		MIME:     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	}
 
+	b.log.InfoContext(ctx, "Succesfully generated report", "user", userID, "period", periodMetric)
 	b.metrics.SentMessages.WithLabelValues("edit").Inc()
 	_ = tbCtx.Edit(responseText, tbCtx.Message().ReplyMarkup)
 	b.metrics.SentMessages.WithLabelValues("file").Inc()
