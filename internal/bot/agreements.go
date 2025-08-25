@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/UnknownOlympus/olympus-protos/gen/go/scraper/olympus"
@@ -21,17 +22,45 @@ func (b *Bot) formatExcelRows(ctx context.Context, userID int64, from, to time.T
 		return nil, fmt.Errorf("failed to get completed tasks by executor: %w", err)
 	}
 
-	var rows []report.ExcelRow
-	for _, task := range tasks {
-		row, rowErr := b.getExcelRowsFromTask(ctx, task)
-		if rowErr != nil {
-			return nil, fmt.Errorf("failed to generate structure of excel rows from task '%d': %w", task.ID, rowErr)
-		}
+	const numWorkers = 15
+	tasksChan := make(chan models.TaskDetails, len(tasks))
+	resultsChan := make(chan []report.ExcelRow, len(tasks))
+	var wg sync.WaitGroup
 
-		rows = append(rows, row...)
+	for range numWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range tasksChan {
+				rows, rowsErr := b.getExcelRowsFromTask(ctx, task)
+				if rowsErr != nil {
+					b.log.Error("failed to process task for report", "task_id", task.ID, "error", rowsErr)
+					resultsChan <- nil
+				} else {
+					resultsChan <- rows
+				}
+			}
+		}()
 	}
 
-	return rows, nil
+	for _, task := range tasks {
+		tasksChan <- task
+	}
+	close(tasksChan)
+
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	var finalRows []report.ExcelRow
+	for rows := range resultsChan {
+		if rows != nil {
+			finalRows = append(finalRows, rows...)
+		}
+	}
+
+	return finalRows, nil
 }
 
 func (b *Bot) getExcelRowsFromTask(ctx context.Context, task models.TaskDetails) ([]report.ExcelRow, error) {

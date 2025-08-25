@@ -8,18 +8,22 @@ import (
 	"time"
 
 	"github.com/UnknownOlympus/oracle/internal/repository"
+	"github.com/google/uuid"
 	"gopkg.in/telebot.v4"
 	"gopkg.in/telebot.v4/react"
 )
 
-var userStates = make(map[int64]string)
+// var userStates = make(map[int64]string)
 
 const (
 	// stateAwaitingEmail indicates that the bot is waiting for the user's email input.
-	stateAwaitingEmail = "awaiting_email"
+	stateAwaitingEmail = "email"
 
 	// stateAwaitingLocation indicates that the bot is waiting fot the user's location input.
-	stateAwaitingLocation = "awaiting_location"
+	stateAwaitingLocation = "location"
+
+	// stateComment indicates that the bot is waiting fot the user's text comment input.
+	stateComment = "comment"
 
 	// ErrInternal is the error message returned when there is an internal server error.
 	ErrInternal = "🚫 Internal server error, please try again later"
@@ -64,7 +68,7 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 // verification in the US system. The user's state is updated to indicate
 // that the bot is awaiting the email input.
 func (b *Bot) authHandler(ctx telebot.Context) error {
-	userStates[ctx.Sender().ID] = stateAwaitingEmail
+	b.stateManager.Set(ctx.Sender().ID, UserState{WaitingFor: stateAwaitingEmail})
 	b.metrics.CommandReceived.WithLabelValues("login").Inc()
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return ctx.Send("📧 Enter your email address, which is specified in the US system..")
@@ -76,58 +80,105 @@ func (b *Bot) authHandler(ctx telebot.Context) error {
 // such as already linked accounts or user not found, providing appropriate feedback to the user.
 func (b *Bot) textHandler(ctx telebot.Context) error {
 	userID := ctx.Sender().ID
-	state, ok := userStates[userID]
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	if !ok || state != stateAwaitingEmail {
+	state, ok := b.stateManager.Get(userID)
+	if !ok {
 		b.metrics.SentMessages.WithLabelValues("reply").Inc()
 		return ctx.Reply("🐒 Use buttons, my little monkeys. Who did I make them for?")
 	}
 
-	email := ctx.Text()
-	b.log.Debug("User is trying to authenticate", "user", userID, "email", email)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
+	switch state.WaitingFor {
+	case stateAwaitingEmail:
+		email := ctx.Text()
+		b.log.Debug("User is trying to authenticate", "user", userID, "email", email)
+		return b.loginInputHandler(timeoutCtx, ctx, userID, email)
+	case stateComment:
+		comment := ctx.Text()
+		b.log.Debug("User is trying to add comment", "user", userID, "comment_length", len(comment))
+		return b.commentConfirmationHandler(ctx, state.TaskID, comment)
+	default:
+		b.log.Error("Get unknown state", "state", state.WaitingFor)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return ctx.Send(ErrInternal)
+	}
+}
+
+func (b *Bot) loginInputHandler(ctx context.Context, bCtx telebot.Context, userID int64, email string) error {
 	startTime := time.Now()
-	err := b.repo.LinkTelegramIDByEmail(timeoutCtx, userID, email)
+	err := b.repo.LinkTelegramIDByEmail(ctx, userID, email)
 	b.metrics.DBQueryDuration.WithLabelValues("link_telegram_id").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		if errors.Is(err, repository.ErrUserAlreadyLinked) {
-			b.log.Info("User already linked to another id", "user", userID, "email", email)
-			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
+			b.log.InfoContext(ctx, "User already linked to another id", "user", userID, "email", email)
+			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
-			return ctx.Send(
+			return bCtx.Send(
 				"❌ User already linked to other telegram account. Log out from other account and try again.",
 			)
 		}
 		if errors.Is(err, repository.ErrIDExists) {
-			b.log.Info("User already has connection with another employee", "user", userID, "email", email)
+			b.log.InfoContext(ctx, "User already has connection with another employee", "user", userID, "email", email)
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
-			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
-			return ctx.Send(
+			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
+			return bCtx.Send(
 				"❌ This telegram ID already linked to other user. Log out from other account and try again.",
 			)
 		}
 		if errors.Is(err, repository.ErrUserNotFound) {
-			b.log.Info("User with this email not found", "user", userID, "email", email)
+			b.log.InfoContext(ctx, "User with this email not found", "user", userID, "email", email)
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
-			_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbDown))
-			return ctx.Send("❌ User with this email not found. Try again:")
+			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
+			return bCtx.Send("❌ User with this email not found. Try again:")
 		}
-		b.log.Error("Failed to link telegram id with employee", "error", err)
+		b.log.ErrorContext(ctx, "Failed to link telegram id with employee", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return bCtx.Send(ErrInternal)
+	}
+	b.log.InfoContext(ctx, "User successfully authenticated", "user", userID, "email", email)
+	b.metrics.SentMessages.WithLabelValues("reaction").Inc()
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbUp))
+	return bCtx.Send("✅ Authentication successful!", authMenu)
+}
+
+func (b *Bot) commentConfirmationHandler(ctx telebot.Context, taskID int, commentText string) error {
+	startTime := time.Now()
+	user, err := b.repo.GetEmployee(context.Background(), ctx.Sender().ID)
+	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
+	if err != nil {
+		b.log.Error("Failed to get employee data", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return ctx.Send(ErrInternal)
 	}
 
-	delete(userStates, userID)
-	b.log.Info("User successfully authenticated", "user", userID, "email", email)
-	b.metrics.SentMessages.WithLabelValues("reaction").Inc()
+	formattedComment := fmt.Sprintf("👤 %s: %s", user.ShortName, commentText)
+	messageText := fmt.Sprintf("**Your comment will look like this:**\n\n`%s`\n\nSending?", formattedComment)
+
+	confirmationID := uuid.New().String()
+	cacheKey := fmt.Sprintf("oracle:comment_confirm:%s", confirmationID)
+	const cacheTTL = 5 * time.Minute
+
+	err = b.redisClient.Set(context.Background(), cacheKey, commentText, cacheTTL).Err()
+	if err != nil {
+		b.log.Error("Failed to save comment to confirmation cache", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return ctx.Send(ErrInternal)
+	}
+
+	callbackData := fmt.Sprintf("%d|%s", taskID, confirmationID)
+	btnAccept := confirmMenu.Data("✅ Accept", "comment_accept", callbackData)
+	btnDecline := confirmMenu.Data("❌ Decline", "comment_decline")
+
+	confirmMenu.Inline(confirmMenu.Row(btnAccept, btnDecline))
+
+	b.log.Debug("Succesfully get comment from user, sending confiramtion request.", "user", ctx.Sender().ID)
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	_ = ctx.Bot().React(ctx.Recipient(), ctx.Message(), react.React(react.ThumbUp))
-	return ctx.Send("✅ Authentication successful!", authMenu)
+	return ctx.Send(messageText, confirmMenu, telebot.ModeMarkdown)
 }
 
 // locationHandler processes the user's location sent via a message.
@@ -140,16 +191,14 @@ func (b *Bot) locationHandler(ctx telebot.Context) error {
 	latitude := ctx.Message().Location.Lat
 	longitude := ctx.Message().Location.Lng
 	radius := 15
-	state, ok := userStates[userID]
+	state, ok := b.stateManager.Get(userID)
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	b.log.Info("User sent geolocation", "user", userID, "latitude", latitude, "longitude", longitude)
 
-	if ok && state == stateAwaitingLocation {
-		delete(userStates, userID)
-
+	if ok && state.WaitingFor == stateAwaitingLocation {
 		startTime := time.Now()
 		tasks, err := b.repo.GetTasksInRadius(timeoutCtx, latitude, longitude, radius)
 		b.metrics.DBQueryDuration.WithLabelValues("get_tasks_in_radius").Observe(time.Since(startTime).Seconds())

@@ -20,6 +20,7 @@ type Bot struct {
 	metrics      *metrics.Metrics
 	redisClient  *redis.Client
 	hermesClient olympus.ScraperServiceClient
+	stateManager *StateManager
 }
 
 var (
@@ -63,10 +64,11 @@ var (
 	btnReportPeriodLast    = telebot.InlineButton{Unique: "report_period_last_month"}
 	btnReportPeriod7Days   = telebot.InlineButton{Unique: "report_period_last_7_days"}
 
+	// Inline menu for comment confirmation.
+	confirmMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
+
 	// fiction button for active tasks action.
-	btnTaskDetails = telebot.InlineButton{
-		Unique: "task_details",
-	}
+	btnTaskDetails = telebot.InlineButton{Unique: "task_details"}
 )
 
 // NewBot creates a new bot with the given token.
@@ -88,6 +90,8 @@ func NewBot(
 	}
 	log.Info("Authorized on account", "account", bot.Me.Username)
 
+	stateManager := NewStateManager()
+
 	botInstance := &Bot{
 		bot:          bot,
 		log:          log,
@@ -95,6 +99,7 @@ func NewBot(
 		metrics:      metrics,
 		redisClient:  redisClient,
 		hermesClient: hermesClient,
+		stateManager: stateManager,
 	}
 
 	mainMenu.Reply(
@@ -156,6 +161,9 @@ func (b *Bot) registerRoutes() {
 	authGroup.Handle(&btnReportPeriod7Days, b.generatorReportHandler)
 
 	authGroup.Handle(&btnActiveTasks, b.activeTasksHandler)
+	authGroup.Handle("\fleave_comment", b.addCommentHandler)
+	authGroup.Handle("\fcomment_accept", b.commentAcceptHandler)
+	authGroup.Handle("\fcomment_decline", b.commentDeclineHandler)
 	authGroup.Handle(&btnStatistic, b.statistic)
 	authGroup.Handle(&btnLogout, b.logoutHandler)
 	authGroup.Handle(&btnInfo, b.infoHandler)
