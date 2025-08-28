@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -16,7 +17,8 @@ import (
 type Bot struct {
 	bot          *telebot.Bot
 	log          *slog.Logger
-	repo         repository.Interface
+	usrepo       repository.BotManager
+	tarepo       repository.TaskManager
 	metrics      *metrics.Metrics
 	redisClient  *redis.Client
 	hermesClient olympus.ScraperServiceClient
@@ -41,8 +43,14 @@ var (
 	btnStatistic = authMenu.Text("📈 My statistic")
 	// button for report.
 	btnReport = authMenu.Text("📊 Create report")
+	// button for administrators.
+	btnAdmin = authMenu.Text("👑 Admin Panel")
 	// button for logout.
 	btnLogout = authMenu.Text("🔓 Logout")
+
+	adminMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
+	// admin buttons.
+	btnBroadcast = adminMenu.Text("📣 A Decree for the Mortals")
 
 	// statistic menu.
 	statMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
@@ -53,11 +61,11 @@ var (
 	// button fot this year statistic.
 	btnYear = statMenu.Text("📅 This Year")
 	// button for back.
-	btnBack = statMenu.Text("⬅️ Back")
+	btnBack = statMenu.Text("⬅️ Back to Main Menu")
 
 	nearMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
 	// button for send location.
-	btnLocation = authMenu.Location("📍  Send location")
+	btnLocation = nearMenu.Location("📍  Send location")
 
 	// inline buttons for report period.
 	btnReportPeriodCurrent = telebot.InlineButton{Unique: "report_period_current_month"}
@@ -74,7 +82,8 @@ var (
 // NewBot creates a new bot with the given token.
 func NewBot(
 	log *slog.Logger,
-	repo repository.Interface,
+	usrepo repository.BotManager,
+	tarepo repository.TaskManager,
 	redisClient *redis.Client,
 	hermesClient olympus.ScraperServiceClient,
 	metrics *metrics.Metrics,
@@ -95,7 +104,8 @@ func NewBot(
 	botInstance := &Bot{
 		bot:          bot,
 		log:          log,
-		repo:         repo,
+		usrepo:       usrepo,
+		tarepo:       tarepo,
 		metrics:      metrics,
 		redisClient:  redisClient,
 		hermesClient: hermesClient,
@@ -105,19 +115,11 @@ func NewBot(
 	mainMenu.Reply(
 		mainMenu.Row(btnLogin),
 	)
-	authMenu.Reply(
-		authMenu.Row(btnInfo),
-		authMenu.Row(btnActiveTasks),
-		authMenu.Row(btnNear),
-		authMenu.Row(btnStatistic),
-		authMenu.Row(btnReport),
-		authMenu.Row(btnLogout),
-	)
 	statMenu.Reply(
-		authMenu.Row(btnToday),
-		authMenu.Row(btnMonth),
-		authMenu.Row(btnYear),
-		authMenu.Row(btnBack),
+		statMenu.Row(btnToday),
+		statMenu.Row(btnMonth),
+		statMenu.Row(btnYear),
+		statMenu.Row(btnBack),
 	)
 	nearMenu.Reply(
 		nearMenu.Row(btnLocation),
@@ -174,4 +176,37 @@ func (b *Bot) registerRoutes() {
 	authGroup.Handle(&btnBack, b.backHandler)
 
 	authGroup.Handle(&btnNear, b.nearTasksHandler)
+
+	// Handler for opening the admin panel
+	authGroup.Handle(&btnAdmin, b.adminPanelHandler)
+	// Handler for the broadcast feature
+	authGroup.Handle(&btnBroadcast, b.broadcastInitiateHandler)
+}
+
+func (b *Bot) buildAuthMenu(isAdmin bool) *telebot.ReplyMarkup {
+	rows := []telebot.Row{
+		authMenu.Row(btnInfo),
+		authMenu.Row(btnActiveTasks),
+		authMenu.Row(btnNear),
+		authMenu.Row(btnStatistic),
+		authMenu.Row(btnReport),
+	}
+	if isAdmin {
+		rows = append(rows, authMenu.Row(btnAdmin))
+	}
+	rows = append(rows, authMenu.Row(btnLogout))
+
+	authMenu.Reply(rows...)
+
+	return authMenu
+}
+
+func (b *Bot) getMenuForUser(ctx context.Context, userID int64) (*telebot.ReplyMarkup, error) {
+	isAdmin, err := b.usrepo.IsAdmin(ctx, userID)
+	if err != nil {
+		b.log.ErrorContext(ctx, "Failed to get response from DB about user privileges", "userID", userID)
+		return nil, fmt.Errorf("failed to get response from DB about user privileges: %w", err)
+	}
+
+	return b.buildAuthMenu(isAdmin), nil
 }

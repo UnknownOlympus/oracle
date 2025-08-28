@@ -29,12 +29,14 @@ func StartMonitoringServer(
 	dtb *pgxpool.Pool,
 	port int,
 	hermesConn *grpc.ClientConn,
+	alertmanagerHandler func(w http.ResponseWriter, r *http.Request),
 ) {
 	mux := http.NewServeMux()
 	healthChecker := NewHealthChecker(log, dtb, hermesConn)
 
 	mux.Handle("/healthz", healthChecker)
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/webhook/alertmanager", alertmanagerHandler)
 
 	log.InfoContext(ctx, "Starting monitoring server", "port", port)
 

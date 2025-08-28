@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/UnknownOlympus/oracle/internal/models"
 	"github.com/UnknownOlympus/oracle/internal/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,7 +25,7 @@ const insertIntoBotUsers = `
 `
 
 const selectGetEmployee = `
-	SELECT id, fullname, shortname, position, email, phone FROM employees
+	SELECT id, fullname, shortname, position, email, phone, is_admin FROM employees
 	WHERE id = (SELECT employee_id FROM bot_users WHERE telegram_id = $1);		
 `
 
@@ -362,8 +363,8 @@ func TestGetEmployee(t *testing.T) {
 		mock.ExpectQuery(regexp.QuoteMeta(selectGetEmployee)).
 			WithArgs(telegramID).
 			WillReturnRows(
-				pgxmock.NewRows([]string{"id", "fullname", "shortname", "position", "email", "phone"}).
-					AddRow(123, "testFull", "testShort", "testPos", "testEmail", "testPhone"),
+				pgxmock.NewRows([]string{"id", "fullname", "shortname", "position", "email", "phone", "is_admin"}).
+					AddRow(123, "testFull", "testShort", "testPos", "testEmail", "testPhone", true),
 			)
 
 		employee, err := repo.GetEmployee(ctx, telegramID)
@@ -374,6 +375,227 @@ func TestGetEmployee(t *testing.T) {
 		assert.Equal(t, "testPos", employee.Position)
 		assert.Equal(t, "testEmail", employee.Email)
 		assert.Equal(t, "testPhone", employee.Phone)
+		assert.True(t, employee.IsAdmin)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+func TestGetAllTgUserIDs(t *testing.T) {
+	ctx := t.Context()
+	id := int64(12345678)
+	query := "SELECT telegram_id from bot_users"
+
+	t.Run("error - query error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnError(assert.AnError)
+
+		_, err = repo.GetAllTgUserIDs(ctx)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to get all telegram user IDs")
+		require.ErrorIs(t, err, assert.AnError)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - scan telegram_id", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"telegram_id"}).
+					AddRow("invalid_id"))
+
+		_, err = repo.GetAllTgUserIDs(ctx)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to scan telegram_id row")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - rows error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"telegram_id"}).
+					AddRow(id).
+					RowError(1, assert.AnError),
+			)
+
+		_, err = repo.GetAllTgUserIDs(ctx)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to read rows")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("success - get all telegram_id", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"telegram_id"}).
+					AddRow(id),
+			)
+
+		actIDs, err := repo.GetAllTgUserIDs(ctx)
+
+		require.NoError(t, err)
+		assert.Equal(t, id, actIDs[0])
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+func TestGetAdmins(t *testing.T) {
+	ctx := t.Context()
+	query := `
+		SELECT telegram_id, employee_id 
+		FROM bot_users bu 
+		LEFT JOIN employees e ON e.id = bu.employee_id
+		WHERE e.is_admin = TRUE
+	`
+	botUser := models.BotUser{TelegramID: int64(123456), EmployeeID: 9999}
+
+	t.Run("error - query error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnError(assert.AnError)
+
+		_, err = repo.GetAdmins(ctx)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to get all bot users with admin privileges")
+		require.ErrorIs(t, err, assert.AnError)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - scan integer type", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"telegram_id", "employee_id"}).
+					AddRow("invalid_id", "invalid_id"))
+
+		_, err = repo.GetAdmins(ctx)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to scan bot user row")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - rows error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"telegram_id", "employee_id"}).
+					AddRow(botUser.TelegramID, botUser.EmployeeID).
+					RowError(1, assert.AnError),
+			)
+
+		_, err = repo.GetAdmins(ctx)
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to read rows")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("success - get all telegram_id", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WillReturnRows(
+				pgxmock.NewRows([]string{"telegram_id", "employee_id"}).
+					AddRow(botUser.TelegramID, botUser.EmployeeID),
+			)
+
+		users, err := repo.GetAdmins(ctx)
+
+		require.NoError(t, err)
+		actUser := users[0]
+		assert.Equal(t, botUser.EmployeeID, actUser.EmployeeID)
+		assert.Equal(t, botUser.TelegramID, actUser.TelegramID)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+func TestIsAdmin(t *testing.T) {
+	ctx := t.Context()
+	telegramID := int64(12345)
+	query := `
+		SELECT is_admin FROM employees
+		WHERE id = (SELECT employee_id FROM bot_users WHERE telegram_id = $1);
+	`
+
+	t.Run("error - query error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WithArgs(telegramID).
+			WillReturnError(assert.AnError)
+
+		isAdmin, err := repo.IsAdmin(ctx, telegramID)
+
+		require.Error(t, err)
+		assert.False(t, isAdmin)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error - query error", func(t *testing.T) {
+		mock, err := pgxmock.NewPool()
+		require.NoError(t, err)
+		defer mock.Close()
+
+		repo := repository.NewRepository(mock)
+
+		mock.ExpectQuery(regexp.QuoteMeta(query)).
+			WithArgs(telegramID).
+			WillReturnRows(pgxmock.NewRows([]string{"is_admin"}).AddRow(true))
+
+		isAdmin, err := repo.IsAdmin(ctx, telegramID)
+
+		require.NoError(t, err)
+		assert.True(t, isAdmin)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 }

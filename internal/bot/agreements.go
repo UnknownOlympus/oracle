@@ -14,7 +14,7 @@ import (
 )
 
 func (b *Bot) formatExcelRows(ctx context.Context, userID int64, from, to time.Time) ([]report.ExcelRow, error) {
-	tasks, err := b.repo.GetCompletedTasksByExecutor(ctx, userID, from, to)
+	tasks, err := b.tarepo.GetCompletedTasksByExecutor(ctx, userID, from, to)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return []report.ExcelRow{}, nil
@@ -99,7 +99,7 @@ func (b *Bot) getExcelRowsFromTask(ctx context.Context, task models.TaskDetails)
 func (b *Bot) GetCustomersByTask(ctx context.Context, task models.TaskDetails) ([]models.Customer, error) {
 	taskID := int64(task.ID)
 
-	clients, err := b.repo.GetCustomersByTaskID(ctx, taskID)
+	clients, err := b.tarepo.GetCustomersByTaskID(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return []models.Customer{}, nil

@@ -7,6 +7,7 @@ import (
 
 	"github.com/UnknownOlympus/oracle/internal/models"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var (
@@ -108,16 +109,99 @@ func (r *Repository) DeleteUserByID(ctx context.Context, telegramID int64) error
 func (r *Repository) GetEmployee(ctx context.Context, telegramID int64) (models.Employee, error) {
 	var employee models.Employee
 	query := `
-		SELECT id, fullname, shortname, position, email, phone FROM employees
+		SELECT id, fullname, shortname, position, email, phone, is_admin FROM employees
 		WHERE id = (SELECT employee_id FROM bot_users WHERE telegram_id = $1);		
 `
 
 	err := r.db.QueryRow(ctx, query, telegramID).Scan(
-		&employee.ID, &employee.FullName, &employee.ShortName, &employee.Position, &employee.Email, &employee.Phone,
+		&employee.ID, &employee.FullName, &employee.ShortName, &employee.Position, &employee.Email, &employee.Phone, &employee.IsAdmin,
 	)
 	if err != nil {
 		return models.Employee{}, fmt.Errorf("failed to get employee data: %w", err)
 	}
 
 	return employee, nil
+}
+
+// IsAdmin retrieves a bool value which respond if employee is admin.
+//
+// Parameters:
+//   - ctx: The context for the database operation.
+//   - telegramID: The Telegram ID of the user whose employee details are to be fetched.
+//
+// Returns:
+//   - bool: if employee is admin.
+//   - error: An error if the retrieval fails.
+func (r *Repository) IsAdmin(ctx context.Context, telegramID int64) (bool, error) {
+	var isAdmin bool
+	query := `
+		SELECT is_admin FROM employees
+		WHERE id = (SELECT employee_id FROM bot_users WHERE telegram_id = $1);
+	`
+
+	err := r.db.QueryRow(ctx, query, telegramID).Scan(&isAdmin)
+	if err != nil {
+		return false, fmt.Errorf("failed to scan admin from employees: %w", err)
+	}
+
+	return isAdmin, nil
+}
+
+func (r *Repository) GetAllTgUserIDs(ctx context.Context) ([]int64, error) {
+	query := "SELECT telegram_id from bot_users"
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all telegram user IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var idx pgtype.Int8
+		if err = rows.Scan(&idx); err != nil {
+			return nil, fmt.Errorf("failed to scan telegram_id row: %w", err)
+		}
+		if idx.Valid {
+			ids = append(ids, idx.Int64)
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
+	}
+
+	return ids, nil
+}
+
+func (r *Repository) GetAdmins(ctx context.Context) ([]models.BotUser, error) {
+	query := `
+		SELECT telegram_id, employee_id 
+		FROM bot_users bu 
+		LEFT JOIN employees e ON e.id = bu.employee_id
+		WHERE e.is_admin = TRUE
+	`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all bot users with admin privileges: %w", err)
+	}
+	defer rows.Close()
+
+	var admins []models.BotUser
+	for rows.Next() {
+		var telegramID pgtype.Int8
+		var admin models.BotUser
+		if err = rows.Scan(&telegramID, &admin.EmployeeID); err != nil {
+			return nil, fmt.Errorf("failed to scan bot user row: %w", err)
+		}
+		if telegramID.Valid {
+			admin.TelegramID = telegramID.Int64
+		}
+		admins = append(admins, admin)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
+	}
+
+	return admins, nil
 }

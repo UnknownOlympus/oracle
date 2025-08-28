@@ -11,13 +11,21 @@ type Repository struct {
 	db Database
 }
 
-// Interface defines the interface for repository operations related to user authentication
+// BotManager defines the interface for repository operations related to user authentication
 // and management. It includes methods for linking a Telegram ID to an email, checking user
 // authentication status, and deleting a user by their Telegram ID.
-type Interface interface {
+type BotManager interface {
 	LinkTelegramIDByEmail(ctx context.Context, telegramID int64, email string) error
 	IsUserAuthenticated(ctx context.Context, telegramID int64) (bool, error)
 	DeleteUserByID(ctx context.Context, telegramID int64) error
+	IsAdmin(ctx context.Context, telegramID int64) (bool, error)
+	GetAllTgUserIDs(ctx context.Context) ([]int64, error)
+	GetAdmins(ctx context.Context) ([]models.BotUser, error)
+}
+
+// TaskManager defines the interface for repository operations related to task management.
+// It includes methods for get employee, get tasks with different status, etc.
+type TaskManager interface {
 	GetEmployee(ctx context.Context, telegramID int64) (models.Employee, error)
 	GetTaskSummary(ctx context.Context, telegramID int64, startDate, endDate time.Time) ([]models.TaskSummary, error)
 	GetActiveTasksByExecutor(ctx context.Context, telegramID int64) ([]models.ActiveTask, error)

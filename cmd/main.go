@@ -71,7 +71,7 @@ func main() {
 	}
 
 	// Initialize the bot with logger, repository, token, and poller timeout.
-	radiBot, err := bot.NewBot(logger, repo, redisClient, hermesClient, appMetrics, cfg.Token, cfg.PollerTimeout)
+	radiBot, err := bot.NewBot(logger, repo, repo, redisClient, hermesClient, appMetrics, cfg.Token, cfg.PollerTimeout)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
@@ -85,7 +85,7 @@ func main() {
 	go radiBot.Start()
 
 	// Start the moniroting server
-	go server.StartMonitoringServer(ctx, logger, reg, dtb, serverPort, hermesConn)
+	go server.StartMonitoringServer(ctx, logger, reg, dtb, serverPort, hermesConn, radiBot.AlertmanagerWebhookHandler)
 
 	// Wait for the context to be canceled (e.g., by Ctrl+C).
 	<-ctx.Done()
