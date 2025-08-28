@@ -25,6 +25,9 @@ const (
 	// stateComment indicates that the bot is waiting fot the user's text comment input.
 	stateComment = "comment"
 
+	// stateComment indicates that the bot is waiting fot the user's text broadcast input.
+	stateAwaitingBroadcast = "broadcast"
+
 	// ErrInternal is the error message returned when there is an internal server error.
 	ErrInternal = "🚫 Internal server error, please try again later"
 )
@@ -43,7 +46,7 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 	defer cancel()
 
 	startTime := time.Now()
-	isAuth, err := b.repo.IsUserAuthenticated(timeoutCtx, userID)
+	isAuth, err := b.usrepo.IsUserAuthenticated(timeoutCtx, userID)
 	b.metrics.DBQueryDuration.WithLabelValues("is_user_authenticated").Observe(time.Since(startTime).Seconds())
 
 	switch {
@@ -52,7 +55,13 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 		metricLabel = "error"
 	case isAuth:
 		responseText = "🤡 Welcome to the almshouse, slave of Radionet!"
-		selectedMenu = authMenu
+		isAuthMenu, menuErr := b.getMenuForUser(timeoutCtx, userID)
+		if menuErr != nil {
+			b.log.ErrorContext(timeoutCtx, "Failed to generate menu for authenticated user", "error", menuErr)
+			responseText = ErrInternal
+			metricLabel = "error"
+		}
+		selectedMenu = isAuthMenu
 	case !isAuth:
 		responseText = "🤡 Welcome to the almshouse, slave of Radionet!\nTo access features, please log in."
 		b.metrics.NewUsers.Inc()
@@ -98,6 +107,10 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 		comment := ctx.Text()
 		b.log.Debug("User is trying to add comment", "user", userID, "comment_length", len(comment))
 		return b.commentConfirmationHandler(ctx, state.TaskID, comment)
+	case stateAwaitingBroadcast:
+		text := ctx.Text()
+		b.log.Debug("User is trying to send broadcast message to everyone", "user", userID)
+		return b.broadcastMessageHandler(timeoutCtx, ctx, text)
 	default:
 		b.log.Error("Get unknown state", "state", state.WaitingFor)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
@@ -107,7 +120,7 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 
 func (b *Bot) loginInputHandler(ctx context.Context, bCtx telebot.Context, userID int64, email string) error {
 	startTime := time.Now()
-	err := b.repo.LinkTelegramIDByEmail(ctx, userID, email)
+	err := b.usrepo.LinkTelegramIDByEmail(ctx, userID, email)
 	b.metrics.DBQueryDuration.WithLabelValues("link_telegram_id").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		if errors.Is(err, repository.ErrUserAlreadyLinked) {
@@ -133,22 +146,31 @@ func (b *Bot) loginInputHandler(ctx context.Context, bCtx telebot.Context, userI
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
 			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
+			b.stateManager.Set(userID, UserState{WaitingFor: stateAwaitingEmail})
 			return bCtx.Send("❌ User with this email not found. Try again:")
 		}
 		b.log.ErrorContext(ctx, "Failed to link telegram id with employee", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		return bCtx.Send(ErrInternal)
 	}
+
+	menu, err := b.getMenuForUser(ctx, userID)
+	if err != nil {
+		b.log.ErrorContext(ctx, "Failed to generate menu for user", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return bCtx.Send(ErrInternal)
+	}
+
 	b.log.InfoContext(ctx, "User successfully authenticated", "user", userID, "email", email)
 	b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbUp))
-	return bCtx.Send("✅ Authentication successful!", authMenu)
+	return bCtx.Send("✅ Authentication successful!", menu)
 }
 
 func (b *Bot) commentConfirmationHandler(ctx telebot.Context, taskID int, commentText string) error {
 	startTime := time.Now()
-	user, err := b.repo.GetEmployee(context.Background(), ctx.Sender().ID)
+	user, err := b.tarepo.GetEmployee(context.Background(), ctx.Sender().ID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)
@@ -200,7 +222,7 @@ func (b *Bot) locationHandler(ctx telebot.Context) error {
 
 	if ok && state.WaitingFor == stateAwaitingLocation {
 		startTime := time.Now()
-		tasks, err := b.repo.GetTasksInRadius(timeoutCtx, latitude, longitude, radius)
+		tasks, err := b.tarepo.GetTasksInRadius(timeoutCtx, latitude, longitude, radius)
 		b.metrics.DBQueryDuration.WithLabelValues("get_tasks_in_radius").Observe(time.Since(startTime).Seconds())
 		if err != nil {
 			b.log.Error("Failed to get nearest tasks", "error", err)

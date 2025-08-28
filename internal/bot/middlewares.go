@@ -18,7 +18,7 @@ func (b *Bot) AuthMiddleware(next telebot.HandlerFunc) telebot.HandlerFunc {
 		)
 
 		startTime := time.Now()
-		isAllowed, err := b.repo.IsUserAuthenticated(context.Background(), userID)
+		isAllowed, err := b.usrepo.IsUserAuthenticated(context.Background(), userID)
 		b.metrics.DBQueryDuration.WithLabelValues("is_user_authenticated").Observe(time.Since(startTime).Seconds())
 		if err != nil {
 			b.log.Error("Failed to authenticate telegram user from DB", "id", userID, "error", err)

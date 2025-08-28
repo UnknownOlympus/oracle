@@ -132,7 +132,14 @@ func (b *Bot) processStatistic(ctx context.Context, userID int64, period string)
 // backHandler handles the event when a user returns to the bot.
 // It sends a welcome back message along with the authentication menu.
 func (b *Bot) backHandler(ctx telebot.Context) error {
-	return ctx.Send("🤖 Welcome back", authMenu)
+	defCtx := context.Background()
+	menu, err := b.getMenuForUser(defCtx, ctx.Sender().ID)
+	if err != nil {
+		b.log.ErrorContext(defCtx, "Failed to generate menu for user", "error", err)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return ctx.Send(ErrInternal)
+	}
+	return ctx.Send("🤖 Welcome back", menu)
 }
 
 // generateStatisticString generates a formatted string containing statistics for a user
@@ -154,7 +161,7 @@ func generateStatisticString(bot *Bot, userID int64, startDate, endDate time.Tim
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	summaries, err := bot.repo.GetTaskSummary(timeoutCtx, userID, startDate, endDate)
+	summaries, err := bot.tarepo.GetTaskSummary(timeoutCtx, userID, startDate, endDate)
 	if err != nil {
 		return "", fmt.Errorf("failed to get task summary: %w", err)
 	}

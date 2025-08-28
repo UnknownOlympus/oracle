@@ -31,7 +31,7 @@ func (b *Bot) logoutHandler(ctx telebot.Context) error {
 	b.metrics.CommandReceived.WithLabelValues("logout").Inc()
 
 	startTime := time.Now()
-	err := b.repo.DeleteUserByID(timeoutCtx, userID)
+	err := b.usrepo.DeleteUserByID(timeoutCtx, userID)
 	b.metrics.DBQueryDuration.WithLabelValues("delete_user").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
@@ -72,7 +72,7 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 	b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
 	b.log.Info("User info not in cache, fetching from DB", "user", userID)
 	startTime := time.Now()
-	user, err := b.repo.GetEmployee(timeoutCtx, userID)
+	user, err := b.tarepo.GetEmployee(timeoutCtx, userID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)
@@ -101,6 +101,12 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 
 // formatUserInfo its a helper function to keep the code DRY.
 func formatUserInfo(user models.Employee) string {
+	var privileges string
+	if user.IsAdmin {
+		privileges = "yes"
+	} else {
+		privileges = "no"
+	}
 	return fmt.Sprintf(`
 🤦‍♂️ *These mortals again…*
 
@@ -108,10 +114,11 @@ func formatUserInfo(user models.Employee) string {
 *Position:* %s
 *Email:* %s
 *Phone:* %s
+*Admin privileges: %s*
 
 💬 Okay, I saved this somewhere… or not.
 `,
-		user.FullName, user.Position, user.Email, user.Phone)
+		user.FullName, user.Position, user.Email, user.Phone, privileges)
 }
 
 // formatTaskDetails is a helper function for taskDetailsHandler.
@@ -164,7 +171,7 @@ func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 	defer cancel()
 
 	startTime := time.Now()
-	tasks, err := b.repo.GetActiveTasksByExecutor(timeoutCtx, userID)
+	tasks, err := b.tarepo.GetActiveTasksByExecutor(timeoutCtx, userID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get active tasks", "error", err, "user", userID)
@@ -240,7 +247,7 @@ func (b *Bot) buildTaskKeyboard(ctx context.Context, userID int64, currentTaskID
 	newMarkup := &telebot.ReplyMarkup{}
 
 	startTime := time.Now()
-	activeTasks, err := b.repo.GetActiveTasksByExecutor(ctx, userID)
+	activeTasks, err := b.tarepo.GetActiveTasksByExecutor(ctx, userID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get active tasks for keyboard: %w", err)
@@ -288,7 +295,7 @@ func (b *Bot) getTaskDetails(ctx context.Context, taskID int) (*models.TaskDetai
 	b.metrics.CacheOps.WithLabelValues("get", "miss").Inc()
 	b.log.InfoContext(ctx, "Task details not in cache, fetching from DB", "task", taskID)
 
-	details, err := b.repo.GetTaskDetailsByID(ctx, taskID)
+	details, err := b.tarepo.GetTaskDetailsByID(ctx, taskID)
 	if err != nil {
 		b.log.ErrorContext(ctx, "Failed to get task details", "error", err, "taskID", taskID)
 		return nil, fmt.Errorf("failed to get task details: %w", err)
@@ -539,7 +546,7 @@ func (b *Bot) commentAcceptHandler(ctx telebot.Context) error {
 	b.redisClient.Del(ctxBack, cacheKey)
 
 	startTime := time.Now()
-	user, err := b.repo.GetEmployee(ctxBack, ctx.Sender().ID)
+	user, err := b.tarepo.GetEmployee(ctxBack, ctx.Sender().ID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)

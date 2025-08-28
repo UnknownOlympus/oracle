@@ -12,6 +12,7 @@ type Employee struct {
 	Position  string    `json:"position"`   // Job position of the employee
 	Email     string    `json:"email"`      // Email address of the employee
 	Phone     string    `json:"phone"`      // Phone number of the employee
+	IsAdmin   bool      `json:"is_admin"`   // IsAdmin returns a bool value if employee is admin
 	CreatedAt time.Time `json:"created_at"` // Timestamp of when the employee record was created
 }
 
@@ -23,4 +24,10 @@ type Customer struct {
 	Contract string `json:"contract"` // Contract ID og the customer
 	Address  string `json:"address"`  // Address which binded to user
 	Tariff   string `json:"tariff"`   // Tariff is the current tariff of the customer
+}
+
+// BotUser represents an individual user in the bot.
+type BotUser struct {
+	TelegramID int64 `json:"telegram_id"`
+	EmployeeID int   `json:"employee_id"`
 }
