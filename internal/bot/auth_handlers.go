@@ -230,12 +230,7 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 	}
 
 	// 2. Build the keyboard for the response.
-	newMarkup, err := b.buildTaskKeyboard(tCtx, userID, taskID)
-	if err != nil {
-		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		b.log.Error("Failed to build task keyboard", "error", err)
-		return ctx.Send(ErrInternal)
-	}
+	newMarkup := b.buildTaskKeyboard(ctx.Message().ReplyMarkup, taskID)
 
 	// 3. Format and send the final message.
 	messageText := formatTaskDetails(details)
@@ -243,38 +238,25 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 }
 
 // buildTaskKeyboard encapsulates all logic for creating the keyboard.
-func (b *Bot) buildTaskKeyboard(ctx context.Context, userID int64, currentTaskID int) (*telebot.ReplyMarkup, error) {
-	newMarkup := &telebot.ReplyMarkup{}
-
-	startTime := time.Now()
-	activeTasks, err := b.tarepo.GetActiveTasksByExecutor(ctx, userID)
-	b.metrics.DBQueryDuration.WithLabelValues("get_active_tasks").Observe(time.Since(startTime).Seconds())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active tasks for keyboard: %w", err)
-	}
-
+func (b *Bot) buildTaskKeyboard(originalMarkup *telebot.ReplyMarkup, currentTaskID int) *telebot.ReplyMarkup {
 	addCommentButton := telebot.InlineButton{
 		Unique: "leave_comment",
 		Text:   "💬 Leave a comment",
 		Data:   strconv.Itoa(currentTaskID),
 	}
-	rows := [][]telebot.InlineButton{{addCommentButton}}
+	newRows := [][]telebot.InlineButton{{addCommentButton}}
 
-	taskButtons := make([]telebot.InlineButton, 0, 3)
-	for idx, task := range activeTasks {
-		btn := telebot.InlineButton{
-			Unique: "task_details",
-			Text:   fmt.Sprintf("#%d", task.ID),
-			Data:   strconv.Itoa(task.ID),
-		}
-		taskButtons = append(taskButtons, btn)
-		if (idx+1)%3 == 0 || idx == len(activeTasks)-1 {
-			rows = append(rows, taskButtons)
-			taskButtons = nil
+	if originalMarkup != nil {
+		b.log.Debug("Received not empty reply keyboard")
+		for _, row := range originalMarkup.InlineKeyboard {
+			if len(row) > 0 && strings.Contains(row[0].Data, "task_details") {
+				newRows = append(newRows, row)
+			}
 		}
 	}
-	newMarkup.InlineKeyboard = rows
-	return newMarkup, nil
+
+	newMarkup := &telebot.ReplyMarkup{InlineKeyboard: newRows}
+	return newMarkup
 }
 
 // getTaskDetails handles the logic of fetching from cache or the database.
@@ -320,7 +302,12 @@ func (b *Bot) sendOrEditMessage(ctx telebot.Context, text string, markup *telebo
 	b.metrics.SentMessages.WithLabelValues("edit").Inc()
 	err := ctx.Edit(text, telebot.ModeMarkdown, markup)
 	if err != nil && !errors.Is(err, telebot.ErrSameMessageContent) {
-		b.log.Error("Failed to edit message", "error", err)
+		b.log.Error("Failed to edit message with markdown mode", "error", err)
+		text = strings.ReplaceAll(text, "*", "")
+		err = ctx.Edit(text, markup)
+		if err != nil {
+			b.log.Error("Failed to edit message", "error", err)
+		}
 	}
 	return err
 }
@@ -393,7 +380,8 @@ func (b *Bot) addCommentHandler(ctx telebot.Context) error {
 	b.stateManager.Set(userID, UserState{WaitingFor: "comment", TaskID: taskID})
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send("✍🏼 Please send the text of your comment.")
+	responseText := fmt.Sprintf("✍🏼 Please send the text of your comment for task #%d.", taskID)
+	return ctx.Send(responseText)
 }
 
 func (b *Bot) parseReportPeriod(ctx telebot.Context) (time.Time, time.Time, string, error) {

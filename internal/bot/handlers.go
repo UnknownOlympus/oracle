@@ -253,12 +253,12 @@ func (b *Bot) locationHandler(ctx telebot.Context) error {
 		}
 
 		menu := &telebot.ReplyMarkup{InlineKeyboard: rows}
-		respnseText := fmt.Sprintf(
+		responseText := fmt.Sprintf(
 			"😊 These are the tasks closest to your location, within %d km.\n(Sorted by closest distance)",
 			radius,
 		)
 		b.metrics.SentMessages.WithLabelValues("text").Inc()
-		return ctx.Send(respnseText, menu)
+		return ctx.Send(responseText, menu)
 	}
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
