@@ -433,7 +433,7 @@ func TestGetAllTgUserIDs(t *testing.T) {
 			WillReturnRows(
 				pgxmock.NewRows([]string{"telegram_id"}).
 					AddRow(id).
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetAllTgUserIDs(ctx)
@@ -522,7 +522,7 @@ func TestGetAdmins(t *testing.T) {
 			WillReturnRows(
 				pgxmock.NewRows([]string{"telegram_id", "employee_id"}).
 					AddRow(botUser.TelegramID, botUser.EmployeeID).
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetAdmins(ctx)

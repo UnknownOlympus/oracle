@@ -72,7 +72,7 @@ func TestGetTaskSummary(t *testing.T) {
 			WithArgs(telegramID, from, to).
 			WillReturnRows(
 				pgxmock.NewRows([]string{"task_type", "count"}).AddRow("Task Type", 1).
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetTaskSummary(ctx, telegramID, from, to)
@@ -175,7 +175,7 @@ func TestGetActiveTasksByExecutor(t *testing.T) {
 			WithArgs(telegramID).
 			WillReturnRows(
 				pgxmock.NewRows([]string{"task_id", "description"}).AddRow(123, "descr").
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetActiveTasksByExecutor(ctx, telegramID)
@@ -302,7 +302,7 @@ func TestGetCompletedTasksByExecutor(t *testing.T) {
 				}).
 					AddRow(12345, "repair", time.Now(), time.Now(), "descr",
 						"test addr", []string{"test user"}, []string{"1 comm", "2 comm"}).
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetCompletedTasksByExecutor(ctx, telegramID, from, to)
@@ -529,7 +529,7 @@ func TestGetTasksInRadius(t *testing.T) {
 			WithArgs(lat, lng, radius).
 			WillReturnRows(
 				pgxmock.NewRows([]string{"task_id", "description"}).AddRow(123, "descr").
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetTasksInRadius(ctx, lat, lng, radius)
@@ -630,7 +630,7 @@ func TestGetCustomersByTaskID(t *testing.T) {
 					"external_id", "name", "login",
 				}).
 					AddRow(int64(123456), "John Doe", "johnd").
-					RowError(1, assert.AnError),
+					CloseError(assert.AnError),
 			)
 
 		_, err = repo.GetCustomersByTaskID(ctx, taskID)
