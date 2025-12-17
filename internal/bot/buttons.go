@@ -15,7 +15,11 @@ func (b *Bot) buildMainMenu(ctx context.Context, tCtx telebot.Context) *telebot.
 }
 
 // buildAuthMenuWithTranslations creates the authenticated user menu with translated text.
-func (b *Bot) buildAuthMenuWithTranslations(ctx context.Context, tCtx telebot.Context, isAdmin bool) *telebot.ReplyMarkup {
+func (b *Bot) buildAuthMenuWithTranslations(
+	ctx context.Context,
+	tCtx telebot.Context,
+	isAdmin bool,
+) *telebot.ReplyMarkup {
 	menu := &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	btnInfo := menu.Text(b.t(ctx, tCtx, "menu.about_me"))

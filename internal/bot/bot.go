@@ -115,7 +115,6 @@ func (b *Bot) registerRoutes() {
 	b.bot.Handle("\fcomment_decline", b.commentDeclineHandler)
 }
 
-
 // getUserLanguage retrieves the user's language preference from the database.
 // It returns the language code, falling back to auto-detection from Telegram if not set.
 func (b *Bot) getUserLanguage(ctx context.Context, tCtx telebot.Context) string {
@@ -136,7 +135,7 @@ func (b *Bot) getUserLanguage(ctx context.Context, tCtx telebot.Context) string 
 			go func() {
 				saveCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
-				if err := b.usrepo.SetUserLanguage(saveCtx, userID, detectedLang); err != nil {
+				if err = b.usrepo.SetUserLanguage(saveCtx, userID, detectedLang); err != nil {
 					b.log.ErrorContext(saveCtx, "Failed to save detected language", "error", err, "userID", userID)
 				}
 			}()

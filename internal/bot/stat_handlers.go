@@ -163,7 +163,12 @@ func (b *Bot) backHandler(ctx telebot.Context) error {
 // Returns:
 // - A formatted string containing the user's statistics and a random encouragement phrase.
 // - An error if the task summary retrieval fails.
-func generateStatisticString(bot *Bot, bCtx telebot.Context, userID int64, startDate, endDate time.Time) (string, error) {
+func generateStatisticString(
+	bot *Bot,
+	bCtx telebot.Context,
+	userID int64,
+	startDate, endDate time.Time,
+) (string, error) {
 	var builder strings.Builder
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

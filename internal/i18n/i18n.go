@@ -18,19 +18,19 @@ type Localizer struct {
 
 // NewLocalizer creates a new Localizer instance and loads all translations.
 func NewLocalizer() (*Localizer, error) {
-	l := &Localizer{
+	locale := &Localizer{
 		translations: make(map[string]map[string]string),
 	}
 
 	// Load supported languages
 	languages := []string{"en", "uk"}
 	for _, lang := range languages {
-		if err := l.loadLanguage(lang); err != nil {
+		if err := locale.loadLanguage(lang); err != nil {
 			return nil, fmt.Errorf("failed to load language %s: %w", lang, err)
 		}
 	}
 
-	return l, nil
+	return locale, nil
 }
 
 // loadLanguage loads translations for a specific language from embedded JSON files.
@@ -42,7 +42,7 @@ func (l *Localizer) loadLanguage(lang string) error {
 	}
 
 	var translations map[string]string
-	if err := json.Unmarshal(data, &translations); err != nil {
+	if err = json.Unmarshal(data, &translations); err != nil {
 		return fmt.Errorf("failed to unmarshal locale file %s: %w", filename, err)
 	}
 
@@ -60,7 +60,7 @@ func (l *Localizer) Get(lang, key string) string {
 	defer l.mu.RUnlock()
 
 	if langTranslations, ok := l.translations[lang]; ok {
-		if translation, ok := langTranslations[key]; ok {
+		if translation, exists := langTranslations[key]; exists {
 			return translation
 		}
 	}
@@ -68,7 +68,7 @@ func (l *Localizer) Get(lang, key string) string {
 	// Fallback to English if translation not found
 	if lang != "en" {
 		if enTranslations, ok := l.translations["en"]; ok {
-			if translation, ok := enTranslations[key]; ok {
+			if translation, exists := enTranslations[key]; exists {
 				return translation
 			}
 		}
@@ -79,7 +79,7 @@ func (l *Localizer) Get(lang, key string) string {
 }
 
 // GetWithData returns the translation for the given key with placeholder replacement.
-// Example: GetWithData("en", "welcome.user", map[string]string{"name": "John"})
+// Example: GetWithData("en", "welcome.user", map[string]string{"name": "John"}).
 func (l *Localizer) GetWithData(lang, key string, data map[string]interface{}) string {
 	translation := l.Get(lang, key)
 
@@ -93,16 +93,16 @@ func (l *Localizer) GetWithData(lang, key string, data map[string]interface{}) s
 }
 
 // replaceAll is a helper function to replace all occurrences of old with new in s.
-func replaceAll(s, old, new string) string {
+func replaceAll(str, oldValue, newValue string) string {
 	result := ""
 	for {
-		i := indexOf(s, old)
-		if i == -1 {
-			result += s
+		idx := indexOf(str, oldValue)
+		if idx == -1 {
+			result += str
 			break
 		}
-		result += s[:i] + new
-		s = s[i+len(old):]
+		result += str[:idx] + newValue
+		str = str[idx+len(oldValue):]
 	}
 	return result
 }
@@ -124,7 +124,8 @@ func NormalizeLanguageCode(telegramLang string) string {
 	}
 
 	// Handle language codes like "en-US" -> "en"
-	if len(telegramLang) >= 2 {
+	const langCodeShortLength = 2
+	if len(telegramLang) >= langCodeShortLength {
 		langCode := telegramLang[:2]
 
 		// Map to supported languages

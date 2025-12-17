@@ -50,7 +50,7 @@ func TestGet(t *testing.T) {
 			name:     "Ukrainian welcome message",
 			lang:     "uk",
 			key:      "welcome.authenticated",
-			expected: "🤡 Ласкаво просимо до богодільні, рабе Радіонету!",
+			expected: "🤡 Ласкаво просимо до богодєльні, раб Радіонету!",
 		},
 		{
 			name:     "Fallback to English",

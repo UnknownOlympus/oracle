@@ -248,8 +248,11 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 func (b *Bot) buildTaskKeyboard(originalMarkup *telebot.ReplyMarkup, currentTaskID int) *telebot.ReplyMarkup {
 	addCommentButton := telebot.InlineButton{
 		Unique: "leave_comment",
-		Text:   "💬 " + b.localizer.Get("en", "comment.button.leave"), // Use English as fallback since we don't have ctx here
-		Data:   strconv.Itoa(currentTaskID),
+		Text: "💬 " + b.localizer.Get(
+			"en",
+			"comment.button.leave",
+		), // Use English as fallback since we don't have ctx here
+		Data: strconv.Itoa(currentTaskID),
 	}
 	newRows := [][]telebot.InlineButton{{addCommentButton}}
 
@@ -431,7 +434,12 @@ func (b *Bot) sendCachedReportIfExists(
 	b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
 	b.log.InfoContext(ctx, "Report found in cache", "user", userID, "key", cacheKey)
 
-	responseText := b.tWithData(ctx, tbCtx, "report.ready", map[string]interface{}{"from": from.Format("02.01.2006"), "to": to.Format("02.01.2006")})
+	responseText := b.tWithData(
+		ctx,
+		tbCtx,
+		"report.ready",
+		map[string]interface{}{"from": from.Format("02.01.2006"), "to": to.Format("02.01.2006")},
+	)
 
 	reportFile := &telebot.Document{
 		File:     telebot.FromReader(bytes.NewReader(cachedReport)),
@@ -479,7 +487,12 @@ func (b *Bot) generateAndSendReport(
 		b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
 	}
 
-	responseText := b.tWithData(ctx, tbCtx, "report.ready", map[string]interface{}{"from": from.Format("02.01.2006"), "to": to.Format("02.01.2006")})
+	responseText := b.tWithData(
+		ctx,
+		tbCtx,
+		"report.ready",
+		map[string]interface{}{"from": from.Format("02.01.2006"), "to": to.Format("02.01.2006")},
+	)
 
 	reportFile := &telebot.Document{
 		File:     telebot.FromReader(reportBuffer),
