@@ -21,6 +21,8 @@ type BotManager interface {
 	IsAdmin(ctx context.Context, telegramID int64) (bool, error)
 	GetAllTgUserIDs(ctx context.Context) ([]int64, error)
 	GetAdmins(ctx context.Context) ([]models.BotUser, error)
+	SetUserLanguage(ctx context.Context, telegramID int64, langCode string) error
+	GetUserLanguage(ctx context.Context, telegramID int64) (string, error)
 }
 
 // TaskManager defines the interface for repository operations related to task management.

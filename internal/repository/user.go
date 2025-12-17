@@ -205,3 +205,42 @@ func (r *Repository) GetAdmins(ctx context.Context) ([]models.BotUser, error) {
 
 	return admins, nil
 }
+
+// SetUserLanguage sets the language preference for a user.
+// It updates the locale column in the bot_users table.
+// If the user doesn't exist, it returns an error.
+func (r *Repository) SetUserLanguage(ctx context.Context, telegramID int64, langCode string) error {
+	query := "UPDATE bot_users SET locale = $1 WHERE telegram_id = $2"
+	cmdTag, err := r.db.Exec(ctx, query, langCode, telegramID)
+	if err != nil {
+		return fmt.Errorf("failed to set user language: %w", err)
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return fmt.Errorf("user with telegram_id %d not found", telegramID)
+	}
+
+	return nil
+}
+
+// GetUserLanguage retrieves the language preference for a user.
+// It returns the language code from the bot_users table.
+// If the user doesn't exist or language is not set, it returns "en" as default.
+func (r *Repository) GetUserLanguage(ctx context.Context, telegramID int64) (string, error) {
+	var langCode pgtype.Text
+	query := "SELECT locale FROM bot_users WHERE telegram_id = $1"
+
+	err := r.db.QueryRow(ctx, query, telegramID).Scan(&langCode)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "en", nil
+		}
+		return "en", fmt.Errorf("failed to get user language: %w", err)
+	}
+
+	if !langCode.Valid || langCode.String == "" {
+		return "en", nil
+	}
+
+	return langCode.String, nil
+}
