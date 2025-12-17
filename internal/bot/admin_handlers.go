@@ -10,22 +10,22 @@ import (
 
 // adminPanelHandler sends the admin-specific keyboard.
 func (b *Bot) adminPanelHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	userID := ctx.Sender().ID
 	b.log.Info("Admin user accessed the admin panel", "user", userID)
 
-	adminMenu.Reply(
-		adminMenu.Row(btnBroadcast),
-		adminMenu.Row(btnBack),
-	)
+	menu := b.buildAdminMenu(timeoutCtx, ctx)
 
-	return ctx.Send(
-		"You are king and god in this realm. Do as you please.\nDo you wish to issue a decree to the mortals, or simply revel in your power?",
-		adminMenu,
-	)
+	return ctx.Send(b.t(timeoutCtx, ctx, "admin.panel.title"), menu)
 }
 
 // broadcastInitiateHandler starts the broadcast process.
 func (b *Bot) broadcastInitiateHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	userID := ctx.Sender().ID
 	b.log.Info("Admin user initiated a broadcast", "user", userID)
 
@@ -35,7 +35,7 @@ func (b *Bot) broadcastInitiateHandler(ctx telebot.Context) error {
 	})
 
 	// 2. Ask the admin to send the message
-	return ctx.Send("Please send the message you want to broadcast to all users.")
+	return ctx.Send(b.t(timeoutCtx, ctx, "admin.broadcast.prompt"))
 }
 
 // broadcastMessageHandler confirms the broadcast and starts the sending process.
@@ -46,7 +46,7 @@ func (b *Bot) broadcastMessageHandler(ctx context.Context, bCtx telebot.Context,
 	users, err := b.usrepo.GetAllTgUserIDs(ctx)
 	if err != nil {
 		b.log.ErrorContext(ctx, "Failed to get users for broadcast", "error", err)
-		return bCtx.Send(ErrInternal)
+		return bCtx.Send(b.t(ctx, bCtx, "error.internal"))
 	}
 
 	// 2. Start the broadcast in a goroutine so the bot doesn't freeze.
@@ -54,10 +54,9 @@ func (b *Bot) broadcastMessageHandler(ctx context.Context, bCtx telebot.Context,
 
 	// 3. Immediately confirm to the admin that the process has started.
 	numReceivers := len(users) - 1
-	responseText := fmt.Sprintf(
-		"✅ Broadcast started. Your message will be sent to %d users.",
-		numReceivers,
-	)
+	responseText := b.tWithData(ctx, bCtx, "admin.broadcast.started", map[string]interface{}{
+		"count": numReceivers,
+	})
 	return bCtx.Send(responseText)
 }
 
@@ -96,11 +95,11 @@ func (b *Bot) sendBroadcast(ctx context.Context, adminID int64, message string, 
 	}
 
 	// Send a final report back to the admin
-	reportText := fmt.Sprintf(
-		"🏁 Broadcast finished!\n\nSuccessfully sent: %d\nFailed to send: %d",
-		successfulSends,
-		failedSends,
-	)
+	// Create a temporary telebot.Context for translation
+	reportText := b.tWithData(ctx, nil, "admin.broadcast.finished", map[string]interface{}{
+		"success": successfulSends,
+		"failed":  failedSends,
+	})
 	if _, err = b.bot.Send(telebot.ChatID(adminID), reportText); err != nil {
 		b.log.WarnContext(ctx, "Failed to send result message to admin", "admin", adminID, "error", err)
 	}

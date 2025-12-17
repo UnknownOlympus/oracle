@@ -35,7 +35,7 @@ const (
 // startHandler process command /start.
 func (b *Bot) startHandler(ctx telebot.Context) error {
 	var responseText string
-	selectedMenu := mainMenu
+	var selectedMenu *telebot.ReplyMarkup
 	userID := ctx.Sender().ID
 	metricLabel := "text"
 
@@ -51,19 +51,23 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 
 	switch {
 	case err != nil:
-		responseText = ErrInternal
+		responseText = b.t(timeoutCtx, ctx, "error.internal")
+		selectedMenu = b.buildMainMenu(timeoutCtx, ctx)
 		metricLabel = "error"
 	case isAuth:
-		responseText = "🤡 Welcome to the almshouse, slave of Radionet!"
-		isAuthMenu, menuErr := b.getMenuForUser(timeoutCtx, userID)
-		if menuErr != nil {
-			b.log.ErrorContext(timeoutCtx, "Failed to generate menu for authenticated user", "error", menuErr)
-			responseText = ErrInternal
+		responseText = b.t(timeoutCtx, ctx, "welcome.authenticated")
+		isAdmin, adminErr := b.usrepo.IsAdmin(timeoutCtx, userID)
+		if adminErr != nil {
+			b.log.ErrorContext(timeoutCtx, "Failed to check admin status", "error", adminErr)
+			responseText = b.t(timeoutCtx, ctx, "error.internal")
+			selectedMenu = b.buildMainMenu(timeoutCtx, ctx)
 			metricLabel = "error"
+		} else {
+			selectedMenu = b.buildAuthMenuWithTranslations(timeoutCtx, ctx, isAdmin)
 		}
-		selectedMenu = isAuthMenu
 	case !isAuth:
-		responseText = "🤡 Welcome to the almshouse, slave of Radionet!\nTo access features, please log in."
+		responseText = b.t(timeoutCtx, ctx, "welcome.unauthenticated")
+		selectedMenu = b.buildMainMenu(timeoutCtx, ctx)
 		b.metrics.NewUsers.Inc()
 	}
 
@@ -77,10 +81,69 @@ func (b *Bot) startHandler(ctx telebot.Context) error {
 // verification in the US system. The user's state is updated to indicate
 // that the bot is awaiting the email input.
 func (b *Bot) authHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	b.stateManager.Set(ctx.Sender().ID, UserState{WaitingFor: stateAwaitingEmail})
 	b.metrics.CommandReceived.WithLabelValues("login").Inc()
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send("📧 Enter your email address, which is specified in the US system..")
+	return ctx.Send(b.t(timeoutCtx, ctx, "login.prompt"))
+}
+
+// routeTextHandler routes text messages to appropriate handlers based on button text or state.
+func (b *Bot) routeTextHandler(ctx telebot.Context) error {
+	text := ctx.Text()
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Get user's language to check button text
+	lang := b.getUserLanguage(timeoutCtx, ctx)
+
+	// Try to match button text in current language first
+	// Then try both languages as fallback (in case language preference is not set correctly)
+	languages := []string{lang}
+	if lang != "en" {
+		languages = append(languages, "en")
+	} else {
+		languages = append(languages, "uk")
+	}
+
+	for _, checkLang := range languages {
+		switch text {
+		// Main menu buttons
+		case b.localizer.Get(checkLang, "menu.login"):
+			return b.authHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.about_me"):
+			return b.infoHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.active_tasks"):
+			return b.activeTasksHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.tasks_near"):
+			return b.nearTasksHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.my_statistic"):
+			return b.statistic(ctx)
+		case b.localizer.Get(checkLang, "menu.create_report"):
+			return b.reportHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.language"):
+			return b.languageHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.admin_panel"):
+			return b.adminPanelHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.logout"):
+			return b.logoutHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.broadcast"):
+			return b.broadcastInitiateHandler(ctx)
+		case b.localizer.Get(checkLang, "menu.today"):
+			return b.statisticHandlerToday(ctx)
+		case b.localizer.Get(checkLang, "menu.this_month"):
+			return b.statisticHandlerMonth(ctx)
+		case b.localizer.Get(checkLang, "menu.this_year"):
+			return b.statisticHandlerYear(ctx)
+		case b.localizer.Get(checkLang, "menu.back"):
+			return b.backHandler(ctx)
+		}
+	}
+
+	// If not a button, handle as regular text (email, comment, broadcast, etc.)
+	return b.textHandler(ctx)
 }
 
 // textHandler processes incoming text messages from users. It checks the user's state,
@@ -91,8 +154,10 @@ func (b *Bot) textHandler(ctx telebot.Context) error {
 	userID := ctx.Sender().ID
 	state, ok := b.stateManager.Get(userID)
 	if !ok {
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 		b.metrics.SentMessages.WithLabelValues("reply").Inc()
-		return ctx.Reply("🐒 Use buttons, my little monkeys. Who did I make them for?")
+		return ctx.Reply(b.t(timeoutCtx, ctx, "general.use_buttons"))
 	}
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -128,18 +193,14 @@ func (b *Bot) loginInputHandler(ctx context.Context, bCtx telebot.Context, userI
 			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
-			return bCtx.Send(
-				"❌ User already linked to other telegram account. Log out from other account and try again.",
-			)
+			return bCtx.Send(b.t(ctx, bCtx, "login.error.already_linked"))
 		}
 		if errors.Is(err, repository.ErrIDExists) {
 			b.log.InfoContext(ctx, "User already has connection with another employee", "user", userID, "email", email)
 			b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
 			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
-			return bCtx.Send(
-				"❌ This telegram ID already linked to other user. Log out from other account and try again.",
-			)
+			return bCtx.Send(b.t(ctx, bCtx, "login.error.id_exists"))
 		}
 		if errors.Is(err, repository.ErrUserNotFound) {
 			b.log.InfoContext(ctx, "User with this email not found", "user", userID, "email", email)
@@ -147,55 +208,63 @@ func (b *Bot) loginInputHandler(ctx context.Context, bCtx telebot.Context, userI
 			b.metrics.SentMessages.WithLabelValues("user_error").Inc()
 			_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbDown))
 			b.stateManager.Set(userID, UserState{WaitingFor: stateAwaitingEmail})
-			return bCtx.Send("❌ User with this email not found. Try again:")
+			return bCtx.Send(b.t(ctx, bCtx, "login.error.not_found"))
 		}
 		b.log.ErrorContext(ctx, "Failed to link telegram id with employee", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return bCtx.Send(ErrInternal)
+		return bCtx.Send(b.t(ctx, bCtx, "error.internal"))
 	}
 
-	menu, err := b.getMenuForUser(ctx, userID)
+	isAdmin, err := b.usrepo.IsAdmin(ctx, userID)
 	if err != nil {
-		b.log.ErrorContext(ctx, "Failed to generate menu for user", "error", err)
+		b.log.ErrorContext(ctx, "Failed to check admin status", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return bCtx.Send(ErrInternal)
+		return bCtx.Send(b.t(ctx, bCtx, "error.internal"))
 	}
+
+	menu := b.buildAuthMenuWithTranslations(ctx, bCtx, isAdmin)
 
 	b.log.InfoContext(ctx, "User successfully authenticated", "user", userID, "email", email)
 	b.metrics.SentMessages.WithLabelValues("reaction").Inc()
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	_ = bCtx.Bot().React(bCtx.Recipient(), bCtx.Message(), react.React(react.ThumbUp))
-	return bCtx.Send("✅ Authentication successful!", menu)
+	return bCtx.Send(b.t(ctx, bCtx, "login.success"), menu)
 }
 
 func (b *Bot) commentConfirmationHandler(ctx telebot.Context, taskID int, commentText string) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	startTime := time.Now()
-	user, err := b.tarepo.GetEmployee(context.Background(), ctx.Sender().ID)
+	user, err := b.tarepo.GetEmployee(timeoutCtx, ctx.Sender().ID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	formattedComment := fmt.Sprintf("👤 %s: %s", user.ShortName, commentText)
-	messageText := fmt.Sprintf("**Your comment will look like this:**\n\n`%s`\n\nSending?", formattedComment)
+	messageText := b.tWithData(timeoutCtx, ctx, "comment.preview", map[string]interface{}{
+		"comment": formattedComment,
+	})
 
 	confirmationID := uuid.New().String()
 	cacheKey := fmt.Sprintf("oracle:comment_confirm:%s", confirmationID)
 	const cacheTTL = 5 * time.Minute
 
-	err = b.redisClient.Set(context.Background(), cacheKey, commentText, cacheTTL).Err()
+	err = b.redisClient.Set(timeoutCtx, cacheKey, commentText, cacheTTL).Err()
 	if err != nil {
 		b.log.Error("Failed to save comment to confirmation cache", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	callbackData := fmt.Sprintf("%d|%s", taskID, confirmationID)
-	btnAccept := confirmMenu.Data("✅ Accept", "comment_accept", callbackData)
-	btnDecline := confirmMenu.Data("❌ Decline", "comment_decline")
 
+	confirmMenu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnAccept := confirmMenu.Data(b.t(timeoutCtx, ctx, "comment.button.accept"), "comment_accept", callbackData)
+	btnDecline := confirmMenu.Data(b.t(timeoutCtx, ctx, "comment.button.decline"), "comment_decline")
 	confirmMenu.Inline(confirmMenu.Row(btnAccept, btnDecline))
 
 	b.log.Debug("Succesfully get comment from user, sending confiramtion request.", "user", ctx.Sender().ID)
@@ -227,12 +296,12 @@ func (b *Bot) locationHandler(ctx telebot.Context) error {
 		if err != nil {
 			b.log.Error("Failed to get nearest tasks", "error", err)
 			b.metrics.SentMessages.WithLabelValues("error").Inc()
-			return ctx.Send(ErrInternal)
+			return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 		}
 
 		if len(tasks) == 0 {
 			b.metrics.SentMessages.WithLabelValues("text").Inc()
-			return ctx.Send("🔧 You in the butt end of the world? There's seriously nothing near you!")
+			return ctx.Send(b.t(timeoutCtx, ctx, "tasks.near.none"))
 		}
 
 		// creates dynamic inline keyboard
@@ -253,14 +322,13 @@ func (b *Bot) locationHandler(ctx telebot.Context) error {
 		}
 
 		menu := &telebot.ReplyMarkup{InlineKeyboard: rows}
-		responseText := fmt.Sprintf(
-			"😊 These are the tasks closest to your location, within %d km.\n(Sorted by closest distance)",
-			radius,
-		)
+		responseText := b.tWithData(timeoutCtx, ctx, "tasks.near.title", map[string]interface{}{
+			"radius": radius,
+		})
 		b.metrics.SentMessages.WithLabelValues("text").Inc()
 		return ctx.Send(responseText, menu)
 	}
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send("Why do you need to send me your geolocation?\nI didn't ask you to do it. 😅")
+	return ctx.Send(b.t(timeoutCtx, ctx, "tasks.near.unsolicited"))
 }

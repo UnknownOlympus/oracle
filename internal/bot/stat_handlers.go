@@ -14,7 +14,11 @@ import (
 // statisticHandler sends a message to the user with options for statistics.
 // It prompts the user to pick which statistic they want to view.
 func (b *Bot) statistic(ctx telebot.Context) error {
-	return ctx.Send("📈 Pick statistic what do you want", statMenu)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	menu := b.buildStatMenu(timeoutCtx, ctx)
+	return ctx.Send(b.t(timeoutCtx, ctx, "statistic.title"), menu)
 }
 
 // statisticHandlerToday handles the request for today's statistics from the user.
@@ -30,7 +34,7 @@ func (b *Bot) statisticHandlerToday(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	responseText := b.processStatistic(timeoutCtx, userID, "day")
+	responseText := b.processStatistic(timeoutCtx, ctx, userID, "day")
 
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
@@ -48,7 +52,7 @@ func (b *Bot) statisticHandlerMonth(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	responseText := b.processStatistic(timeoutCtx, userID, "month")
+	responseText := b.processStatistic(timeoutCtx, ctx, userID, "month")
 
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
@@ -66,7 +70,7 @@ func (b *Bot) statisticHandlerYear(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	responseText := b.processStatistic(timeoutCtx, userID, "year")
+	responseText := b.processStatistic(timeoutCtx, ctx, userID, "year")
 
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
@@ -75,7 +79,7 @@ func (b *Bot) statisticHandlerYear(ctx telebot.Context) error {
 // It logs the user's request, generates the statistics string for the period time,
 // and sends the response back to the user. In case of an error during the
 // generation of the statistics, it sends an internal error message.
-func (b *Bot) processStatistic(ctx context.Context, userID int64, period string) string {
+func (b *Bot) processStatistic(ctx context.Context, bCtx telebot.Context, userID int64, period string) string {
 	// --- 1. Create a unique cache key ---
 	// The key includes the user ID and the period to keep it unique.
 	cacheKey := fmt.Sprintf("oracle:statistic:%d:%s", userID, period)
@@ -110,7 +114,7 @@ func (b *Bot) processStatistic(ctx context.Context, userID int64, period string)
 
 	// --- 4. Generate the statistics string ---
 	startTime := time.Now()
-	responseText, err := generateStatisticString(b, userID, from, to)
+	responseText, err := generateStatisticString(b, bCtx, userID, from, to)
 	b.metrics.DBQueryDuration.WithLabelValues("get_task_summary").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
@@ -132,14 +136,18 @@ func (b *Bot) processStatistic(ctx context.Context, userID int64, period string)
 // backHandler handles the event when a user returns to the bot.
 // It sends a welcome back message along with the authentication menu.
 func (b *Bot) backHandler(ctx telebot.Context) error {
-	defCtx := context.Background()
-	menu, err := b.getMenuForUser(defCtx, ctx.Sender().ID)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	userID := ctx.Sender().ID
+	isAdmin, err := b.usrepo.IsAdmin(timeoutCtx, userID)
 	if err != nil {
-		b.log.ErrorContext(defCtx, "Failed to generate menu for user", "error", err)
-		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		b.log.ErrorContext(timeoutCtx, "Failed to check admin status", "error", err)
+		isAdmin = false
 	}
-	return ctx.Send("🤖 Welcome back", menu)
+
+	menu := b.buildAuthMenuWithTranslations(timeoutCtx, ctx, isAdmin)
+	return ctx.Send(b.t(timeoutCtx, ctx, "general.welcome_back"), menu)
 }
 
 // generateStatisticString generates a formatted string containing statistics for a user
@@ -155,7 +163,7 @@ func (b *Bot) backHandler(ctx telebot.Context) error {
 // Returns:
 // - A formatted string containing the user's statistics and a random encouragement phrase.
 // - An error if the task summary retrieval fails.
-func generateStatisticString(bot *Bot, userID int64, startDate, endDate time.Time) (string, error) {
+func generateStatisticString(bot *Bot, bCtx telebot.Context, userID int64, startDate, endDate time.Time) (string, error) {
 	var builder strings.Builder
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -166,7 +174,8 @@ func generateStatisticString(bot *Bot, userID int64, startDate, endDate time.Tim
 		return "", fmt.Errorf("failed to get task summary: %w", err)
 	}
 
-	builder.WriteString("🐘 *Your stats*:\n\n")
+	builder.WriteString(bot.t(timeoutCtx, bCtx, "statistic.your_stats"))
+	builder.WriteString("\n\n")
 
 	for _, summary := range summaries {
 		if summary.Type == "Total" {
@@ -177,10 +186,10 @@ func generateStatisticString(bot *Bot, userID int64, startDate, endDate time.Tim
 	}
 
 	encouragementPhrases := []string{
-		"_Well, you tried!_",
-		"_They pay pennies for repairs\n\t(c) Confucius_",
-		"_Maybe you could do better, but as it is_",
-		"_If you want more repairs, find the nearest box and fuck it up_",
+		bot.t(timeoutCtx, bCtx, "statistic.phrase.1"),
+		bot.t(timeoutCtx, bCtx, "statistic.phrase.2"),
+		bot.t(timeoutCtx, bCtx, "statistic.phrase.3"),
+		bot.t(timeoutCtx, bCtx, "statistic.phrase.4"),
 	}
 
 	randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(encouragementPhrases))))
