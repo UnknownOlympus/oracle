@@ -35,11 +35,12 @@ func (b *Bot) logoutHandler(ctx telebot.Context) error {
 	b.metrics.DBQueryDuration.WithLabelValues("delete_user").Observe(time.Since(startTime).Seconds())
 	if err != nil {
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send("💩 Failed to logout, please try later")
+		return ctx.Send(b.t(timeoutCtx, ctx, "logout.error"))
 	}
 
+	menu := b.buildMainMenu(timeoutCtx, ctx)
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send("😢 Logout was successfull", mainMenu)
+	return ctx.Send(b.t(timeoutCtx, ctx, "logout.success"), menu)
 }
 
 // infoHandler handles the request for user information. It logs the request, retrieves the employee data
@@ -63,7 +64,7 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 		b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
 		var user models.Employee
 		if json.Unmarshal([]byte(cachedUserJSON), &user) == nil {
-			responseText := formatUserInfo(user) // Use a helper to format the text
+			responseText := b.formatUserInfo(timeoutCtx, ctx, user)
 			b.metrics.SentMessages.WithLabelValues("text_cached").Inc()
 			return ctx.Send(responseText, telebot.ModeMarkdown)
 		}
@@ -77,7 +78,7 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 	if err != nil {
 		b.log.Error("Failed to get employee data", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	userJSON, err := json.Marshal(user)
@@ -94,31 +95,35 @@ func (b *Bot) infoHandler(ctx telebot.Context) error {
 	}
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	responseText := formatUserInfo(user)
+	responseText := b.formatUserInfo(timeoutCtx, ctx, user)
 
 	return ctx.Send(responseText, telebot.ModeMarkdown)
 }
 
 // formatUserInfo its a helper function to keep the code DRY.
-func formatUserInfo(user models.Employee) string {
-	var privileges string
+func (b *Bot) formatUserInfo(ctx context.Context, tCtx telebot.Context, user models.Employee) string {
+	adminStatus := b.t(ctx, tCtx, "info.admin_no")
 	if user.IsAdmin {
-		privileges = "yes"
-	} else {
-		privileges = "no"
+		adminStatus = b.t(ctx, tCtx, "info.admin_yes")
 	}
-	return fmt.Sprintf(`
-🤦‍♂️ *These mortals again…*
 
-*Name:* %s
-*Position:* %s
-*Email:* %s
-*Phone:* %s
-*Admin privileges: %s*
+	return fmt.Sprintf(`%s
 
-💬 Okay, I saved this somewhere… or not.
-`,
-		user.FullName, user.Position, user.Email, user.Phone, privileges)
+%s
+%s
+%s
+%s
+%s
+
+%s`,
+		b.t(ctx, tCtx, "info.title"),
+		b.tWithData(ctx, tCtx, "info.name", map[string]interface{}{"name": user.FullName}),
+		b.tWithData(ctx, tCtx, "info.position", map[string]interface{}{"position": user.Position}),
+		b.tWithData(ctx, tCtx, "info.email", map[string]interface{}{"email": user.Email}),
+		b.tWithData(ctx, tCtx, "info.phone", map[string]interface{}{"phone": user.Phone}),
+		b.tWithData(ctx, tCtx, "info.admin_privileges", map[string]interface{}{"admin": adminStatus}),
+		b.t(ctx, tCtx, "info.footer"),
+	)
 }
 
 // formatTaskDetails is a helper function for taskDetailsHandler.
@@ -176,12 +181,12 @@ func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 	if err != nil {
 		b.log.Error("Failed to get active tasks", "error", err, "user", userID)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	if len(tasks) == 0 {
 		b.metrics.SentMessages.WithLabelValues("text").Inc()
-		return ctx.Send("🎉 You have no active tasks!")
+		return ctx.Send(b.t(timeoutCtx, ctx, "tasks.active.none"))
 	}
 
 	// creates dynamic inline keyboard
@@ -203,7 +208,7 @@ func (b *Bot) activeTasksHandler(ctx telebot.Context) error {
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	menu := &telebot.ReplyMarkup{InlineKeyboard: rows}
-	return ctx.Send("Here is a list of your active tasks:", menu)
+	return ctx.Send(b.t(timeoutCtx, ctx, "tasks.active.title"), menu)
 }
 
 // taskDetailsHandler now acts as a high-level orchestrator.
@@ -211,9 +216,11 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 	b.metrics.CommandReceived.WithLabelValues("task_details").Inc()
 	taskID, err := strconv.Atoi(ctx.Data())
 	if err != nil {
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 		b.log.Error("Invalid task ID in callback", "error", err, "data", ctx.Data())
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	userID := ctx.Sender().ID
@@ -241,7 +248,7 @@ func (b *Bot) taskDetailsHandler(ctx telebot.Context) error {
 func (b *Bot) buildTaskKeyboard(originalMarkup *telebot.ReplyMarkup, currentTaskID int) *telebot.ReplyMarkup {
 	addCommentButton := telebot.InlineButton{
 		Unique: "leave_comment",
-		Text:   "💬 Leave a comment",
+		Text:   "💬 " + b.localizer.Get("en", "comment.button.leave"), // Use English as fallback since we don't have ctx here
 		Data:   strconv.Itoa(currentTaskID),
 	}
 	newRows := [][]telebot.InlineButton{{addCommentButton}}
@@ -317,15 +324,18 @@ func (b *Bot) sendOrEditMessage(ctx telebot.Context, text string, markup *telebo
 // the last month, and the last 7 days. It sends a message prompting the user to select
 // their desired reporting period along with the corresponding inline keyboard menu.
 func (b *Bot) reportHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	menu := &telebot.ReplyMarkup{}
 	menu.Inline(
-		menu.Row(menu.Data("⌛ For the current month", "report_period_current_month")),
-		menu.Row(menu.Data("⏳ For the last month", "report_period_last_month")),
-		menu.Row(menu.Data("⏰ For the last 7 days", "report_period_last_7_days")),
+		menu.Row(menu.Data(b.t(timeoutCtx, ctx, "report.period.current_month"), "report_period_current_month")),
+		menu.Row(menu.Data(b.t(timeoutCtx, ctx, "report.period.last_month"), "report_period_last_month")),
+		menu.Row(menu.Data(b.t(timeoutCtx, ctx, "report.period.last_7_days"), "report_period_last_7_days")),
 	)
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Send("🐷 Choose how many days you want the report for", menu)
+	return ctx.Send(b.t(timeoutCtx, ctx, "report.choose_period"), menu)
 }
 
 // generatorReportHandler handles the generation of reports based on the user's request.
@@ -341,20 +351,20 @@ func (b *Bot) reportHandler(ctx telebot.Context) error {
 // If the report generation fails or there are no completed tasks for the selected period,
 // an appropriate error message is sent to the user.
 func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	b.metrics.CommandReceived.WithLabelValues("report").Inc()
 	b.metrics.SentMessages.WithLabelValues("respond").Inc()
-	_ = ctx.Respond(&telebot.CallbackResponse{Text: "🔧 One moment, generating your report..."})
+	_ = ctx.Respond(&telebot.CallbackResponse{Text: b.t(timeoutCtx, ctx, "report.generating")})
 
 	userID := ctx.Sender().ID
 	b.log.Info("User requested report", "user", userID, "data", ctx.Callback().Unique)
 
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	from, to, periodMetric, err := b.parseReportPeriod(ctx)
 	if err != nil {
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Edit("💩 Unsupported time period", ctx.Message().ReplyMarkup)
+		return ctx.Edit(b.t(timeoutCtx, ctx, "report.error.unsupported_period"), ctx.Message().ReplyMarkup)
 	}
 
 	cacheKey := fmt.Sprintf("oracle:report:user:%d:period:%s", userID, periodMetric)
@@ -366,6 +376,9 @@ func (b *Bot) generatorReportHandler(ctx telebot.Context) error {
 }
 
 func (b *Bot) addCommentHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	b.metrics.CommandReceived.WithLabelValues("leave_comment").Inc()
 	userID := ctx.Sender().ID
 	taskID, err := strconv.Atoi(ctx.Data())
@@ -380,7 +393,9 @@ func (b *Bot) addCommentHandler(ctx telebot.Context) error {
 	b.stateManager.Set(userID, UserState{WaitingFor: "comment", TaskID: taskID})
 
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	responseText := fmt.Sprintf("✍🏼 Please send the text of your comment for task #%d.", taskID)
+	responseText := b.tWithData(timeoutCtx, ctx, "comment.prompt", map[string]interface{}{
+		"id": taskID,
+	})
 	return ctx.Send(responseText)
 }
 
@@ -416,11 +431,7 @@ func (b *Bot) sendCachedReportIfExists(
 	b.metrics.CacheOps.WithLabelValues("get", "hit").Inc()
 	b.log.InfoContext(ctx, "Report found in cache", "user", userID, "key", cacheKey)
 
-	responseText := fmt.Sprintf(
-		"💩 Your report for the period %s to %s is ready.\nJust pass it on to Tanz and leave me alone 😩",
-		from.Format("02.01.2006"),
-		to.Format("02.01.2006"),
-	)
+	responseText := b.tWithData(ctx, tbCtx, "report.ready", map[string]interface{}{"from": from.Format("02.01.2006"), "to": to.Format("02.01.2006")})
 
 	reportFile := &telebot.Document{
 		File:     telebot.FromReader(bytes.NewReader(cachedReport)),
@@ -453,8 +464,7 @@ func (b *Bot) generateAndSendReport(
 	if err != nil {
 		if errors.Is(err, report.ErrNoTasks) {
 			b.metrics.SentMessages.WithLabelValues("edit").Inc()
-			return tbCtx.Edit("💩 There are no completed tasks for the report for the selected period.",
-				tbCtx.Message().ReplyMarkup)
+			return tbCtx.Edit(b.t(ctx, tbCtx, "report.no_tasks"), tbCtx.Message().ReplyMarkup)
 		}
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
 		b.log.ErrorContext(ctx, "Failed to generate report", "error", err, "user", userID)
@@ -469,11 +479,7 @@ func (b *Bot) generateAndSendReport(
 		b.metrics.CacheOps.WithLabelValues("set", "success").Inc()
 	}
 
-	responseText := fmt.Sprintf(
-		"💩 Your report for the period %s to %s is ready.\nJust pass it on to Tanz and leave me alone 😩",
-		from.Format("02.01.2006"),
-		to.Format("02.01.2006"),
-	)
+	responseText := b.tWithData(ctx, tbCtx, "report.ready", map[string]interface{}{"from": from.Format("02.01.2006"), "to": to.Format("02.01.2006")})
 
 	reportFile := &telebot.Document{
 		File:     telebot.FromReader(reportBuffer),
@@ -494,15 +500,19 @@ func (b *Bot) generateAndSendReport(
 // prompting the user to provide their geolocation.
 // This feature is currently in beta testing, and users are encouraged to report any errors.
 func (b *Bot) nearTasksHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	b.log.Info("User requested near tasks", "user", ctx.Sender().ID)
 	b.metrics.CommandReceived.WithLabelValues("near").Inc()
 
 	b.stateManager.Set(ctx.Sender().ID, UserState{WaitingFor: stateAwaitingLocation})
 
+	menu := b.buildNearMenu(timeoutCtx, ctx)
 	b.metrics.SentMessages.WithLabelValues("reply").Inc()
 	return ctx.Reply(
-		"🧳 I'm ready, but first provide your geolocation",
-		nearMenu,
+		b.t(timeoutCtx, ctx, "tasks.near.prompt"),
+		menu,
 		telebot.ModeMarkdownV2,
 	)
 }
@@ -527,8 +537,10 @@ func (b *Bot) commentAcceptHandler(ctx telebot.Context) error {
 	cacheKey := fmt.Sprintf("oracle:comment_confirm:%s", parts[1])
 	commentText, err := b.redisClient.Get(ctxBack, cacheKey).Result()
 	if err != nil {
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 		b.log.Warn("Could not find comment in condirmation cache", "error", err, "key", cacheKey)
-		return ctx.Edit("⌛ Confirmation expired. Please try again.")
+		return ctx.Edit(b.t(timeoutCtx, ctx, "comment.expired"))
 	}
 
 	b.redisClient.Del(ctxBack, cacheKey)
@@ -537,9 +549,11 @@ func (b *Bot) commentAcceptHandler(ctx telebot.Context) error {
 	user, err := b.tarepo.GetEmployee(ctxBack, ctx.Sender().ID)
 	b.metrics.DBQueryDuration.WithLabelValues("get_employee").Observe(time.Since(startTime).Seconds())
 	if err != nil {
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 		b.log.Error("Failed to get employee data", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	resp, err := b.hermesClient.AddComment(
@@ -547,23 +561,30 @@ func (b *Bot) commentAcceptHandler(ctx telebot.Context) error {
 		&olympus.AddCommentRequest{TaskId: taskID, Author: user.ShortName, Text: commentText},
 	)
 	if err != nil {
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 		b.log.Error("Failed to get response from Hermes", "error", err)
 		b.metrics.SentMessages.WithLabelValues("error").Inc()
-		return ctx.Send(ErrInternal)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
 	}
 
 	go b.updateTaskCommentsInCache(context.Background(), taskID, resp.GetComments())
 
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
-	return ctx.Edit("✅ Comment added successfully.")
+	return ctx.Edit(b.t(timeoutCtx, ctx, "comment.success"))
 }
 
 // commentDeclineHandler - cancel.
 func (b *Bot) commentDeclineHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	b.log.Info("User requested decline comment", "user", ctx.Sender().ID)
 	b.metrics.CommandReceived.WithLabelValues("comment_declined").Inc()
 	b.metrics.SentMessages.WithLabelValues("edit").Inc()
-	return ctx.Edit("❌ Operation canceled.")
+	return ctx.Edit(b.t(timeoutCtx, ctx, "comment.declined"))
 }
 
 func (b *Bot) updateTaskCommentsInCache(ctx context.Context, taskID int64, newComments []string) {
