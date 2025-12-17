@@ -8,7 +8,7 @@ The bot now supports multiple languages with the following features:
 - **Supported Languages**: English (en) and Ukrainian (uk)
 - **Auto-detection**: Automatically detects user language from Telegram settings
 - **User preference storage**: Language preference is stored in the database
-- **Easy switching**: Users can change language via `/language` command
+- **Easy switching**: Users can change language via button **Change Language** in **Auth Menu**
 
 ## Architecture
 
@@ -157,31 +157,6 @@ No manual database changes are required.
 1. If a translation key is not found in the requested language, it falls back to English
 2. If still not found in English, returns the key itself
 3. This ensures the bot never shows empty messages
-
-## Handler Updates
-
-The following handlers have been updated to support i18n:
-- ✅ `startHandler` - Welcome messages
-- ✅ `authHandler` - Login prompt
-- ✅ `loginInputHandler` - Login responses
-- ✅ `textHandler` - General text handling
-- ✅ `languageHandler` - Language selection (NEW)
-- ✅ `languageChangeHandler` - Language change confirmation (NEW)
-
-### Remaining Handlers
-
-The following handlers still need to be updated (but will use fallback to English):
-- `logoutHandler`
-- `infoHandler`
-- `activeTasksHandler`
-- `taskDetailsHandler`
-- `reportHandler`
-- `nearTasksHandler`
-- `commentAcceptHandler`
-- `statisticHandler*`
-- Admin handlers
-
-These can be updated following the same pattern as the updated handlers.
 
 ## Testing
 
