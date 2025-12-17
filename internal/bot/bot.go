@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/UnknownOlympus/olympus-protos/gen/go/scraper/olympus"
+	"github.com/UnknownOlympus/oracle/internal/i18n"
 	"github.com/UnknownOlympus/oracle/internal/metrics"
 	"github.com/UnknownOlympus/oracle/internal/repository"
 	"github.com/redis/go-redis/v9"
@@ -23,57 +24,14 @@ type Bot struct {
 	redisClient  *redis.Client
 	hermesClient olympus.ScraperServiceClient
 	stateManager *StateManager
+	localizer    *i18n.Localizer
 }
 
 var (
-	// main menu for unathorized users.
-	mainMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
-	// button for login.
-	btnLogin = mainMenu.Text("🔐 Login")
-
-	// inline menu for authorized users.
-	authMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
-	// button for info.
-	btnInfo = authMenu.Text("🙍‍♂️ About me")
-	// button for active tasks.
-	btnActiveTasks = authMenu.Text("✅ Active tasks")
-	// button for near tasks.
-	btnNear = authMenu.Text("🗺️ Tasks near you")
-	// button for statistic.
-	btnStatistic = authMenu.Text("📈 My statistic")
-	// button for report.
-	btnReport = authMenu.Text("📊 Create report")
-	// button for administrators.
-	btnAdmin = authMenu.Text("👑 Admin Panel")
-	// button for logout.
-	btnLogout = authMenu.Text("🔓 Logout")
-
-	adminMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
-	// admin buttons.
-	btnBroadcast = adminMenu.Text("📣 A Decree for the Mortals")
-
-	// statistic menu.
-	statMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
-	// button for today statistic.
-	btnToday = statMenu.Text("📅 Today")
-	// button for this month statistic.
-	btnMonth = statMenu.Text("📅 This Month")
-	// button fot this year statistic.
-	btnYear = statMenu.Text("📅 This Year")
-	// button for back.
-	btnBack = statMenu.Text("⬅️ Back to Main Menu")
-
-	nearMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
-	// button for send location.
-	btnLocation = nearMenu.Location("📍  Send location")
-
 	// inline buttons for report period.
 	btnReportPeriodCurrent = telebot.InlineButton{Unique: "report_period_current_month"}
 	btnReportPeriodLast    = telebot.InlineButton{Unique: "report_period_last_month"}
 	btnReportPeriod7Days   = telebot.InlineButton{Unique: "report_period_last_7_days"}
-
-	// Inline menu for comment confirmation.
-	confirmMenu = &telebot.ReplyMarkup{ResizeKeyboard: true}
 
 	// fiction button for active tasks action.
 	btnTaskDetails = telebot.InlineButton{Unique: "task_details"}
@@ -101,6 +59,11 @@ func NewBot(
 
 	stateManager := NewStateManager()
 
+	localizer, err := i18n.NewLocalizer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize localizer: %w", err)
+	}
+
 	botInstance := &Bot{
 		bot:          bot,
 		log:          log,
@@ -110,21 +73,8 @@ func NewBot(
 		redisClient:  redisClient,
 		hermesClient: hermesClient,
 		stateManager: stateManager,
+		localizer:    localizer,
 	}
-
-	mainMenu.Reply(
-		mainMenu.Row(btnLogin),
-	)
-	statMenu.Reply(
-		statMenu.Row(btnToday),
-		statMenu.Row(btnMonth),
-		statMenu.Row(btnYear),
-		statMenu.Row(btnBack),
-	)
-	nearMenu.Reply(
-		nearMenu.Row(btnLocation),
-		nearMenu.Row(btnBack),
-	)
 
 	botInstance.registerRoutes()
 
@@ -147,66 +97,63 @@ func (b *Bot) Stop() {
 func (b *Bot) registerRoutes() {
 	// Public routes.
 	b.bot.Handle("/start", b.startHandler)
-	b.bot.Handle(&btnLogin, b.authHandler)
-	b.bot.Handle(telebot.OnText, b.textHandler)
+	b.bot.Handle("/language", b.languageHandler)
+	b.bot.Handle(telebot.OnText, b.routeTextHandler)
 	b.bot.Handle(&btnTaskDetails, b.taskDetailsHandler)
 	b.bot.Handle(telebot.OnLocation, b.locationHandler)
 
-	// group for protected routes.
-	authGroup := b.bot.Group()
-	authGroup.Use(b.AuthMiddleware)
+	// Language selection callbacks
+	b.bot.Handle("\flanguage_en", b.languageChangeHandler)
+	b.bot.Handle("\flanguage_uk", b.languageChangeHandler)
 
-	// Protected routes.
-	authGroup.Handle(&btnReport, b.reportHandler)
-	authGroup.Handle(&btnReportPeriodCurrent, b.generatorReportHandler)
-	authGroup.Handle(&btnReportPeriodLast, b.generatorReportHandler)
-	authGroup.Handle(&btnReportPeriod7Days, b.generatorReportHandler)
-
-	authGroup.Handle(&btnActiveTasks, b.activeTasksHandler)
-	authGroup.Handle("\fleave_comment", b.addCommentHandler)
-	authGroup.Handle("\fcomment_accept", b.commentAcceptHandler)
-	authGroup.Handle("\fcomment_decline", b.commentDeclineHandler)
-	authGroup.Handle(&btnStatistic, b.statistic)
-	authGroup.Handle(&btnLogout, b.logoutHandler)
-	authGroup.Handle(&btnInfo, b.infoHandler)
-
-	authGroup.Handle(&btnToday, b.statisticHandlerToday)
-	authGroup.Handle(&btnMonth, b.statisticHandlerMonth)
-	authGroup.Handle(&btnYear, b.statisticHandlerYear)
-	authGroup.Handle(&btnBack, b.backHandler)
-
-	authGroup.Handle(&btnNear, b.nearTasksHandler)
-
-	// Handler for opening the admin panel
-	authGroup.Handle(&btnAdmin, b.adminPanelHandler)
-	// Handler for the broadcast feature
-	authGroup.Handle(&btnBroadcast, b.broadcastInitiateHandler)
+	// Inline button callbacks
+	b.bot.Handle(&btnReportPeriodCurrent, b.generatorReportHandler)
+	b.bot.Handle(&btnReportPeriodLast, b.generatorReportHandler)
+	b.bot.Handle(&btnReportPeriod7Days, b.generatorReportHandler)
+	b.bot.Handle("\fleave_comment", b.addCommentHandler)
+	b.bot.Handle("\fcomment_accept", b.commentAcceptHandler)
+	b.bot.Handle("\fcomment_decline", b.commentDeclineHandler)
 }
 
-func (b *Bot) buildAuthMenu(isAdmin bool) *telebot.ReplyMarkup {
-	rows := []telebot.Row{
-		authMenu.Row(btnInfo),
-		authMenu.Row(btnActiveTasks),
-		authMenu.Row(btnNear),
-		authMenu.Row(btnStatistic),
-		authMenu.Row(btnReport),
-	}
-	if isAdmin {
-		rows = append(rows, authMenu.Row(btnAdmin))
-	}
-	rows = append(rows, authMenu.Row(btnLogout))
+// getUserLanguage retrieves the user's language preference from the database.
+// It returns the language code, falling back to auto-detection from Telegram if not set.
+func (b *Bot) getUserLanguage(ctx context.Context, tCtx telebot.Context) string {
+	userID := tCtx.Sender().ID
 
-	authMenu.Reply(rows...)
-
-	return authMenu
-}
-
-func (b *Bot) getMenuForUser(ctx context.Context, userID int64) (*telebot.ReplyMarkup, error) {
-	isAdmin, err := b.usrepo.IsAdmin(ctx, userID)
+	// Try to get saved language preference
+	lang, err := b.usrepo.GetUserLanguage(ctx, userID)
 	if err != nil {
-		b.log.ErrorContext(ctx, "Failed to get response from DB about user privileges", "userID", userID)
-		return nil, fmt.Errorf("failed to get response from DB about user privileges: %w", err)
+		b.log.WarnContext(ctx, "Failed to get user language, using default", "error", err, "userID", userID)
+		return "en"
 	}
 
-	return b.buildAuthMenu(isAdmin), nil
+	// If language is not set, try to detect from Telegram and save it
+	if lang == "en" && tCtx.Sender().LanguageCode != "" {
+		detectedLang := i18n.NormalizeLanguageCode(tCtx.Sender().LanguageCode)
+		if detectedLang != "en" {
+			// Save detected language asynchronously
+			go func() {
+				saveCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if err = b.usrepo.SetUserLanguage(saveCtx, userID, detectedLang); err != nil {
+					b.log.ErrorContext(saveCtx, "Failed to save detected language", "error", err, "userID", userID)
+				}
+			}()
+			return detectedLang
+		}
+	}
+
+	return lang
+}
+
+// t is a shorthand method for getting translations.
+func (b *Bot) t(ctx context.Context, tCtx telebot.Context, key string) string {
+	lang := b.getUserLanguage(ctx, tCtx)
+	return b.localizer.Get(lang, key)
+}
+
+// tWithData is a shorthand method for getting translations with placeholder data.
+func (b *Bot) tWithData(ctx context.Context, tCtx telebot.Context, key string, data map[string]interface{}) string {
+	lang := b.getUserLanguage(ctx, tCtx)
+	return b.localizer.GetWithData(lang, key, data)
 }
