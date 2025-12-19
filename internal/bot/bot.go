@@ -25,6 +25,7 @@ type Bot struct {
 	hermesClient olympus.ScraperServiceClient
 	stateManager *StateManager
 	localizer    *i18n.Localizer
+	menuBuilder  *MenuBuilder
 }
 
 var (
@@ -75,6 +76,9 @@ func NewBot(
 		stateManager: stateManager,
 		localizer:    localizer,
 	}
+
+	// Initialize menu builder after bot instance is created
+	botInstance.menuBuilder = NewMenuBuilder(botInstance)
 
 	botInstance.registerRoutes()
 
@@ -128,7 +132,7 @@ func (b *Bot) getUserLanguage(ctx context.Context, tCtx telebot.Context) string 
 	}
 
 	// If language is not set, try to detect from Telegram and save it
-	if lang == "en" && tCtx.Sender().LanguageCode != "" {
+	if lang == "" && tCtx.Sender().LanguageCode != "" {
 		detectedLang := i18n.NormalizeLanguageCode(tCtx.Sender().LanguageCode)
 		if detectedLang != "en" {
 			// Save detected language asynchronously

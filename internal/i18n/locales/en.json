@@ -21,7 +21,7 @@
   "menu.today": "📅 Today",
   "menu.this_month": "📅 This Month",
   "menu.this_year": "📅 This Year",
-  "menu.back": "⬅️ Back to Main Menu",
+  "menu.back": "⬅️ Back",
   "menu.send_location": "📍  Send location",
   "menu.language": "🌐 Change Language",
   "info.title": "🤦‍♂️ *These mortals again…*",
@@ -82,5 +82,14 @@
   "language.select": "🌐 Please select your preferred language:",
   "language.changed": "✅ Language changed to English successfully!",
   "language.button.english": "🇬🇧 English",
-  "language.button.ukrainian": "🇺🇦 Українська"
+  "language.button.ukrainian": "🇺🇦 Українська",
+  "menu.tasks": "📋 Tasks",
+  "menu.profile": "📊 Profile",
+  "menu.more": "⚙️ More",
+  "menu.report_issue": "🐛 Report Bug/Feature",
+  "issue.title": "📝 *Report a Bug or Request a Feature*",
+  "issue.description": "Found a bug or have an idea for a new feature?\n\nPlease report it on our GitHub Issues page:\n🔗 https://github.com/UnknownOlympus/oracle/issues\n\n*Before creating an issue:*\n✅ Check if it already exists\n✅ Use the issue templates\n✅ Provide detailed information\n\nThank you for helping us improve!",
+  "tasks.title": "🧾 Here’s everything related to your tasks.\nPick what you need 👇",
+  "profile.title": "👤 This is your profile.\nCheck your info or stats 👇",
+  "more.title": "🧩 More options and tools.\nChoose what you need 👇"
 }

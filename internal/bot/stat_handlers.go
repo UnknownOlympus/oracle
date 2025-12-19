@@ -11,16 +11,6 @@ import (
 	"gopkg.in/telebot.v4"
 )
 
-// statisticHandler sends a message to the user with options for statistics.
-// It prompts the user to pick which statistic they want to view.
-func (b *Bot) statistic(ctx telebot.Context) error {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	menu := b.buildStatMenu(timeoutCtx, ctx)
-	return ctx.Send(b.t(timeoutCtx, ctx, "statistic.title"), menu)
-}
-
 // statisticHandlerToday handles the request for today's statistics from the user.
 // It logs the user's request, generates the statistics string for the current day,
 // and sends the response back to the user.
@@ -131,23 +121,6 @@ func (b *Bot) processStatistic(ctx context.Context, bCtx telebot.Context, userID
 	// --- 6. Send the response ---
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return responseText
-}
-
-// backHandler handles the event when a user returns to the bot.
-// It sends a welcome back message along with the authentication menu.
-func (b *Bot) backHandler(ctx telebot.Context) error {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	userID := ctx.Sender().ID
-	isAdmin, err := b.usrepo.IsAdmin(timeoutCtx, userID)
-	if err != nil {
-		b.log.ErrorContext(timeoutCtx, "Failed to check admin status", "error", err)
-		isAdmin = false
-	}
-
-	menu := b.buildAuthMenuWithTranslations(timeoutCtx, ctx, isAdmin)
-	return ctx.Send(b.t(timeoutCtx, ctx, "general.welcome_back"), menu)
 }
 
 // generateStatisticString generates a formatted string containing statistics for a user

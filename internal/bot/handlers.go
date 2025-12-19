@@ -96,54 +96,65 @@ func (b *Bot) routeTextHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	// Get user's language to check button text
+	// Special case: Login button (for unauthenticated users)
 	lang := b.getUserLanguage(timeoutCtx, ctx)
-
-	// Try to match button text in current language first
-	// Then try both languages as fallback (in case language preference is not set correctly)
-	languages := []string{lang}
-	if lang != "en" {
-		languages = append(languages, "en")
-	} else {
-		languages = append(languages, "uk")
+	if text == b.localizer.Get(lang, "menu.login") || text == b.localizer.Get("en", "menu.login") {
+		return b.authHandler(ctx)
 	}
 
-	for _, checkLang := range languages {
-		switch text {
-		// Main menu buttons
-		case b.localizer.Get(checkLang, "menu.login"):
-			return b.authHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.about_me"):
-			return b.infoHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.active_tasks"):
-			return b.activeTasksHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.tasks_near"):
-			return b.nearTasksHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.my_statistic"):
-			return b.statistic(ctx)
-		case b.localizer.Get(checkLang, "menu.create_report"):
-			return b.reportHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.language"):
-			return b.languageHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.admin_panel"):
-			return b.adminPanelHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.logout"):
-			return b.logoutHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.broadcast"):
-			return b.broadcastInitiateHandler(ctx)
-		case b.localizer.Get(checkLang, "menu.today"):
-			return b.statisticHandlerToday(ctx)
-		case b.localizer.Get(checkLang, "menu.this_month"):
-			return b.statisticHandlerMonth(ctx)
-		case b.localizer.Get(checkLang, "menu.this_year"):
-			return b.statisticHandlerYear(ctx)
-		case b.localizer.Get(checkLang, "menu.back"):
-			return b.backHandler(ctx)
-		}
+	// Check if it's a "Back" button press
+	if text == b.localizer.Get(lang, "menu.back") || text == b.localizer.Get("en", "menu.back") {
+		return b.menuBuilder.NavigateBack(timeoutCtx, ctx, ctx.Sender().ID)
+	}
+
+	// Use menu builder to resolve handler
+	handlerName, subMenu := b.menuBuilder.ResolveHandlerFromButtonText(timeoutCtx, ctx, text)
+
+	// If it's a submenu, show it and track navigation
+	if subMenu != "" {
+		return b.menuBuilder.ShowMenu(timeoutCtx, ctx, subMenu, ctx.Sender().ID, "", true)
+	}
+
+	// If it's a handler, call it
+	if handlerName != "" {
+		return b.callHandler(handlerName, ctx)
 	}
 
 	// If not a button, handle as regular text (email, comment, broadcast, etc.)
 	return b.textHandler(ctx)
+}
+
+// callHandler maps handler names to actual handler functions.
+func (b *Bot) callHandler(handlerName string, ctx telebot.Context) error {
+	switch handlerName {
+	case "info":
+		return b.infoHandler(ctx)
+	case "active_tasks":
+		return b.activeTasksHandler(ctx)
+	case "near_tasks":
+		return b.nearTasksHandler(ctx)
+	case "statistic_today":
+		return b.statisticHandlerToday(ctx)
+	case "statistic_month":
+		return b.statisticHandlerMonth(ctx)
+	case "statistic_year":
+		return b.statisticHandlerYear(ctx)
+	case "report":
+		return b.reportHandler(ctx)
+	case "language":
+		return b.languageHandler(ctx)
+	case "report_issue":
+		return b.reportIssueHandler(ctx)
+	case "logout":
+		return b.logoutHandler(ctx)
+	case "broadcast_initiate":
+		return b.broadcastInitiateHandler(ctx)
+	default:
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		b.log.Warn("Unknown handler requested", "handler", handlerName)
+		return ctx.Send(b.t(timeoutCtx, ctx, "general.use_buttons"))
+	}
 }
 
 // textHandler processes incoming text messages from users. It checks the user's state,

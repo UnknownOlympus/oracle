@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📚 Documentation
+    url: https://github.com/UnknownOlympus/oracle/blob/main/README.md
+    about: Check the documentation for help and guides
+  - name: 💬 Discussions
+    url: https://github.com/UnknownOlympus/oracle/discussions
+    about: Ask questions and discuss ideas with the community
