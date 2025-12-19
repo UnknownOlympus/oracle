@@ -134,20 +134,13 @@ func (b *Bot) processStatistic(ctx context.Context, bCtx telebot.Context, userID
 }
 
 // backHandler handles the event when a user returns to the bot.
-// It sends a welcome back message along with the authentication menu.
+// DEPRECATED: Back navigation is now handled by menuBuilder.NavigateBack().
+// This function is kept for backward compatibility.
 func (b *Bot) backHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	userID := ctx.Sender().ID
-	isAdmin, err := b.usrepo.IsAdmin(timeoutCtx, userID)
-	if err != nil {
-		b.log.ErrorContext(timeoutCtx, "Failed to check admin status", "error", err)
-		isAdmin = false
-	}
-
-	menu := b.buildAuthMenuWithTranslations(timeoutCtx, ctx, isAdmin)
-	return ctx.Send(b.t(timeoutCtx, ctx, "general.welcome_back"), menu)
+	return b.menuBuilder.NavigateBack(timeoutCtx, ctx, ctx.Sender().ID)
 }
 
 // generateStatisticString generates a formatted string containing statistics for a user

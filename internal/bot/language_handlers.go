@@ -55,19 +55,27 @@ func (b *Bot) languageChangeHandler(ctx telebot.Context) error {
 
 	b.log.InfoContext(timeoutCtx, "User changed language", "userID", userID, "language", langCode)
 
-	// Clear cache to force menu regeneration with new language
-	isAdmin, err := b.usrepo.IsAdmin(timeoutCtx, userID)
-	if err != nil {
-		b.log.ErrorContext(timeoutCtx, "Failed to check admin status", "error", err)
-		isAdmin = false
-	}
-
-	// Build menu with new language
-	menu := b.buildAuthMenuWithTranslations(timeoutCtx, ctx, isAdmin)
-
 	b.metrics.SentMessages.WithLabelValues("respond").Inc()
 	_ = ctx.Respond(&telebot.CallbackResponse{Text: "✅"})
 
-	b.metrics.SentMessages.WithLabelValues("edit").Inc()
-	return ctx.Send(b.t(timeoutCtx, ctx, "language.changed"), menu)
+	// Verify the language was actually changed
+	newLang, err := b.usrepo.GetUserLanguage(timeoutCtx, userID)
+	if err != nil {
+		b.log.ErrorContext(timeoutCtx, "Failed to verify language change", "error", err, "userID", userID)
+		b.metrics.SentMessages.WithLabelValues("error").Inc()
+		return ctx.Send(b.localizer.Get("en", "error.internal"))
+	}
+
+	b.log.InfoContext(timeoutCtx, "Language verified after change", "userID", userID, "newLang", newLang, "expected", langCode)
+
+	// Build menu with new language
+	menu := b.menuBuilder.Build(timeoutCtx, ctx, MenuMore, userID)
+
+	// Get confirmation message in new language
+	confirmMsg := b.localizer.Get(langCode, "language.changed")
+
+	b.log.InfoContext(timeoutCtx, "Sending menu in new language", "userID", userID, "language", langCode)
+
+	b.metrics.SentMessages.WithLabelValues("text").Inc()
+	return ctx.Send(confirmMsg, menu)
 }
