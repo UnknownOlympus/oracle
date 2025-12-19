@@ -8,19 +8,6 @@ import (
 	"gopkg.in/telebot.v4"
 )
 
-// adminPanelHandler sends the admin-specific keyboard.
-func (b *Bot) adminPanelHandler(ctx telebot.Context) error {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	userID := ctx.Sender().ID
-	b.log.Info("Admin user accessed the admin panel", "user", userID)
-
-	menu := b.buildAdminMenu(timeoutCtx, ctx)
-
-	return ctx.Send(b.t(timeoutCtx, ctx, "admin.panel.title"), menu)
-}
-
 // broadcastInitiateHandler starts the broadcast process.
 func (b *Bot) broadcastInitiateHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

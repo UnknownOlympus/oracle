@@ -66,7 +66,16 @@ func (b *Bot) languageChangeHandler(ctx telebot.Context) error {
 		return ctx.Send(b.localizer.Get("en", "error.internal"))
 	}
 
-	b.log.InfoContext(timeoutCtx, "Language verified after change", "userID", userID, "newLang", newLang, "expected", langCode)
+	b.log.InfoContext(
+		timeoutCtx,
+		"Language verified after change",
+		"userID",
+		userID,
+		"newLang",
+		newLang,
+		"expected",
+		langCode,
+	)
 
 	// Build menu with new language
 	menu := b.menuBuilder.Build(timeoutCtx, ctx, MenuMore, userID)

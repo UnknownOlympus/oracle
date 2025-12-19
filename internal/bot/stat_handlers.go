@@ -11,16 +11,6 @@ import (
 	"gopkg.in/telebot.v4"
 )
 
-// statisticHandler sends a message to the user with options for statistics.
-// It prompts the user to pick which statistic they want to view.
-func (b *Bot) statistic(ctx telebot.Context) error {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	menu := b.buildStatMenu(timeoutCtx, ctx)
-	return ctx.Send(b.t(timeoutCtx, ctx, "statistic.title"), menu)
-}
-
 // statisticHandlerToday handles the request for today's statistics from the user.
 // It logs the user's request, generates the statistics string for the current day,
 // and sends the response back to the user.
@@ -131,16 +121,6 @@ func (b *Bot) processStatistic(ctx context.Context, bCtx telebot.Context, userID
 	// --- 6. Send the response ---
 	b.metrics.SentMessages.WithLabelValues("text").Inc()
 	return responseText
-}
-
-// backHandler handles the event when a user returns to the bot.
-// DEPRECATED: Back navigation is now handled by menuBuilder.NavigateBack().
-// This function is kept for backward compatibility.
-func (b *Bot) backHandler(ctx telebot.Context) error {
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	return b.menuBuilder.NavigateBack(timeoutCtx, ctx, ctx.Sender().ID)
 }
 
 // generateStatisticString generates a formatted string containing statistics for a user

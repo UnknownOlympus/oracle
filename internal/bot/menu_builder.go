@@ -33,7 +33,7 @@ func (mb *MenuBuilder) Build(
 ) *telebot.ReplyMarkup {
 	menuDef := mb.registry.Get(menuType)
 	if menuDef == nil {
-		mb.bot.log.Error("Menu definition not found", "menuType", menuType)
+		mb.bot.log.ErrorContext(ctx, "Menu definition not found", "menuType", menuType)
 		return mb.buildFallbackMenu(ctx, tCtx)
 	}
 

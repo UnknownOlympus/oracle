@@ -21,8 +21,10 @@ func (ns *NavigationStack) Push(userID int64, menu MenuType) {
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
 
+	const maxMenuStack = 5
+
 	if ns.stacks[userID] == nil {
-		ns.stacks[userID] = make([]MenuType, 0, 5)
+		ns.stacks[userID] = make([]MenuType, 0, maxMenuStack)
 	}
 
 	ns.stacks[userID] = append(ns.stacks[userID], menu)
