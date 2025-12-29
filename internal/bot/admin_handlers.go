@@ -8,6 +8,8 @@ import (
 	"gopkg.in/telebot.v4"
 )
 
+const timeout = 5
+
 // broadcastInitiateHandler starts the broadcast process.
 func (b *Bot) broadcastInitiateHandler(ctx telebot.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -90,4 +92,134 @@ func (b *Bot) sendBroadcast(ctx context.Context, adminID int64, message string, 
 	if _, err = b.bot.Send(telebot.ChatID(adminID), reportText); err != nil {
 		b.log.WarnContext(ctx, "Failed to send result message to admin", "admin", adminID, "error", err)
 	}
+}
+
+// geocodingIssuesHandler displays tasks with geocoding problems for debugging.
+func (b *Bot) geocodingIssuesHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+	defer cancel()
+
+	userID := ctx.Sender().ID
+	b.log.Info("Admin requested geocoding issues view", "user", userID)
+
+	// Fetch geocoding issues from database
+	issues, err := b.tarepo.GetGeocodingIssues(timeoutCtx)
+	if err != nil {
+		b.log.ErrorContext(timeoutCtx, "Failed to get geocoding issues", "error", err)
+		return ctx.Send(b.t(timeoutCtx, ctx, "error.internal"))
+	}
+
+	// If no issues found, inform the admin
+	if len(issues) == 0 {
+		return ctx.Send(b.t(timeoutCtx, ctx, "admin.geocoding.no_issues"))
+	}
+
+	// Format the response as a structured table
+	// Limit to prevent Telegram message size limits (max 4096 chars)
+	maxIssues := 20
+	if len(issues) > maxIssues {
+		issues = issues[:maxIssues]
+	}
+
+	// Build formatted response with header
+	responseText := b.tWithData(timeoutCtx, ctx, "admin.geocoding.issues_header", map[string]interface{}{
+		"total": len(issues),
+	})
+	responseText += "\n\n"
+
+	// Format each issue as a structured entry
+	for idx, issue := range issues {
+		// Truncate address if too long
+		address := issue.Address
+		const maxAddrLen = 40
+		if len(address) > maxAddrLen {
+			address = address[:maxAddrLen] + "..."
+		}
+
+		// Truncate error message if too long
+		errorMsg := issue.GeocodingError
+		if errorMsg == "" {
+			errorMsg = b.t(timeoutCtx, ctx, "admin.geocoding.no_error_yet")
+		}
+		const maxErrorLen = 50
+		if len(errorMsg) > maxErrorLen {
+			errorMsg = errorMsg[:maxErrorLen] + "..."
+		}
+
+		// Format entry with task ID, attempts, address, and error
+		entryText := b.tWithData(timeoutCtx, ctx, "admin.geocoding.issue_entry", map[string]interface{}{
+			"num":      idx + 1,
+			"id":       issue.TaskID,
+			"attempts": issue.GeocodingAttempts,
+			"address":  address,
+			"error":    errorMsg,
+		})
+		responseText += entryText + "\n"
+	}
+
+	// Add footer note if results were truncated
+	if len(issues) == maxIssues {
+		responseText += "\n" + b.t(timeoutCtx, ctx, "admin.geocoding.issues_truncated")
+	}
+
+	return ctx.Send(responseText, telebot.ModeMarkdown)
+}
+
+// geocodingResetHandler resets geocoding errors with confirmation.
+func (b *Bot) geocodingResetHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+	defer cancel()
+
+	userID := ctx.Sender().ID
+	b.log.Info("Admin requested geocoding errors reset", "user", userID)
+
+	// Create confirmation inline keyboard
+	confirmMenu := &telebot.ReplyMarkup{}
+	btnConfirm := confirmMenu.Data(
+		b.t(timeoutCtx, ctx, "admin.geocoding.reset.confirm"),
+		"geocoding_reset_confirm",
+		"confirm",
+	)
+	btnCancel := confirmMenu.Data(
+		b.t(timeoutCtx, ctx, "admin.geocoding.reset.cancel"),
+		"geocoding_reset_cancel",
+	)
+	confirmMenu.Inline(confirmMenu.Row(btnConfirm, btnCancel))
+
+	// Send confirmation prompt
+	promptText := b.t(timeoutCtx, ctx, "admin.geocoding.reset.prompt")
+	return ctx.Send(promptText, confirmMenu, telebot.ModeMarkdown)
+}
+
+// geocodingResetConfirmHandler executes the geocoding reset after confirmation.
+func (b *Bot) geocodingResetConfirmHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+	defer cancel()
+
+	userID := ctx.Sender().ID
+	b.log.Info("Admin confirmed geocoding errors reset", "user", userID)
+
+	// Execute the reset
+	rowsAffected, err := b.tarepo.ResetGeocodingErrors(timeoutCtx)
+	if err != nil {
+		b.log.ErrorContext(timeoutCtx, "Failed to reset geocoding errors", "error", err)
+		return ctx.Edit(b.t(timeoutCtx, ctx, "error.internal"))
+	}
+
+	// Send success message with count
+	responseText := b.tWithData(timeoutCtx, ctx, "admin.geocoding.reset.success", map[string]interface{}{
+		"count": rowsAffected,
+	})
+	b.log.Info("Geocoding errors reset successfully", "rows_affected", rowsAffected, "admin", userID)
+
+	return ctx.Edit(responseText, telebot.ModeMarkdown)
+}
+
+// geocodingResetCancelHandler handles the cancel action for geocoding reset.
+func (b *Bot) geocodingResetCancelHandler(ctx telebot.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+	defer cancel()
+
+	b.log.Info("Admin canceled geocoding errors reset", "user", ctx.Sender().ID)
+	return ctx.Edit(b.t(timeoutCtx, ctx, "admin.geocoding.reset.canceled"), telebot.ModeMarkdown)
 }

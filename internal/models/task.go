@@ -36,3 +36,12 @@ type TaskDetails struct {
 	Latitude       pgtype.Float8 `json:"latitude"`        // Latitude indicates the geographical latitude of the task.
 	Longitude      pgtype.Float8 `json:"longitude"`       // Longitude indicates the geographical longitude of the task.
 }
+
+// GeocodingIssue represents a task that has geocoding problems.
+// Used for admin debugging of the Atlas geocoding service.
+type GeocodingIssue struct {
+	TaskID            int    // Task ID
+	Address           string // Task address that failed to geocode
+	GeocodingError    string // Last geocoding error message
+	GeocodingAttempts int    // Number of failed geocoding attempts
+}

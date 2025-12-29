@@ -35,6 +35,8 @@ type TaskManager interface {
 	GetCompletedTasksByExecutor(ctx context.Context, telegramID int64, from, to time.Time) ([]models.TaskDetails, error)
 	GetTasksInRadius(ctx context.Context, lat, lng float32, radius int) ([]models.ActiveTask, error)
 	GetCustomersByTaskID(ctx context.Context, taskID int64) ([]models.Customer, error)
+	GetGeocodingIssues(ctx context.Context) ([]models.GeocodingIssue, error)
+	ResetGeocodingErrors(ctx context.Context) (int64, error)
 }
 
 // NewRepository creates a new instance of Repository with the provided Database.

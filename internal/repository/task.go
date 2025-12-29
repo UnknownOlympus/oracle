@@ -309,3 +309,66 @@ func (r *Repository) GetCustomersByTaskID(ctx context.Context, taskID int64) ([]
 
 	return customers, nil
 }
+
+// GetGeocodingIssues retrieves tasks that have geocoding problems.
+// Returns tasks without coordinates (latitude/longitude NULL) or tasks with geocoding errors.
+// Used by admin panel for debugging the Atlas geocoding service.
+func (r *Repository) GetGeocodingIssues(ctx context.Context) ([]models.GeocodingIssue, error) {
+	query := `
+		SELECT
+			task_id,
+			address,
+			COALESCE(geocoding_error, '') as geocoding_error,
+			COALESCE(geocoding_attempts, 0) as geocoding_attempts
+		FROM tasks
+		WHERE
+			(latitude IS NULL OR longitude IS NULL)
+			AND address IS NOT NULL
+			AND address != ''
+			AND is_closed = FALSE
+		ORDER BY geocoding_attempts DESC, task_id ASC
+		LIMIT 100;
+	`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query geocoding issues: %w", err)
+	}
+	defer rows.Close()
+
+	var issues []models.GeocodingIssue
+	for rows.Next() {
+		var issue models.GeocodingIssue
+		if err = rows.Scan(&issue.TaskID, &issue.Address, &issue.GeocodingError, &issue.GeocodingAttempts); err != nil {
+			return nil, fmt.Errorf("failed to scan geocoding issue row: %w", err)
+		}
+		issues = append(issues, issue)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read rows: %w", err)
+	}
+
+	return issues, nil
+}
+
+// ResetGeocodingErrors clears geocoding error information for all tasks.
+// Sets geocoding_attempts to 0 and geocoding_error to NULL for all tasks.
+// This allows the Atlas service to retry geocoding on the next run.
+// Returns the number of tasks that were reset.
+func (r *Repository) ResetGeocodingErrors(ctx context.Context) (int64, error) {
+	query := `
+		UPDATE tasks
+		SET
+			geocoding_attempts = 0,
+			geocoding_error = NULL
+		WHERE
+			(geocoding_attempts > 0 OR geocoding_error IS NOT NULL);
+	`
+	result, err := r.db.Exec(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to reset geocoding errors: %w", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	return rowsAffected, nil
+}
