@@ -149,6 +149,10 @@ func (b *Bot) callHandler(handlerName string, ctx telebot.Context) error {
 		return b.logoutHandler(ctx)
 	case "broadcast_initiate":
 		return b.broadcastInitiateHandler(ctx)
+	case "geocoding_issues":
+		return b.geocodingIssuesHandler(ctx)
+	case "geocoding_reset":
+		return b.geocodingResetHandler(ctx)
 	default:
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()

@@ -89,7 +89,19 @@
   "menu.report_issue": "🐛 Report Bug/Feature",
   "issue.title": "📝 *Report a Bug or Request a Feature*",
   "issue.description": "Found a bug or have an idea for a new feature?\n\nPlease report it on our GitHub Issues page:\n🔗 https://github.com/UnknownOlympus/oracle/issues\n\n*Before creating an issue:*\n✅ Check if it already exists\n✅ Use the issue templates\n✅ Provide detailed information\n\nThank you for helping us improve!",
-  "tasks.title": "🧾 Here’s everything related to your tasks.\nPick what you need 👇",
+  "tasks.title": "🧾 Here's everything related to your tasks.\nPick what you need 👇",
   "profile.title": "👤 This is your profile.\nCheck your info or stats 👇",
-  "more.title": "🧩 More options and tools.\nChoose what you need 👇"
+  "more.title": "🧩 More options and tools.\nChoose what you need 👇",
+  "menu.geocoding_issues": "🗺️ View Geocoding Issues",
+  "menu.geocoding_reset": "🔄 Reset Geocoding Errors",
+  "admin.geocoding.no_issues": "✅ *No geocoding issues found!*\n\nAll tasks have been successfully geocoded.",
+  "admin.geocoding.issues_header": "🗺️ *Geocoding Issues Debug View*\n\nFound *{total}* tasks without coordinates:",
+  "admin.geocoding.issue_entry": "`{num}.` Task *#{id}* ({attempts} attempts)\n   📍 {address}\n   ❌ {error}",
+  "admin.geocoding.no_error_yet": "No error (not attempted yet)",
+  "admin.geocoding.issues_truncated": "⚠️ _Showing first 20 issues only. Check Atlas service logs for full details._",
+  "admin.geocoding.reset.prompt": "⚠️ *Reset Geocoding Errors*\n\nThis will:\n• Set geocoding_attempts to 0 for all tasks\n• Clear geocoding_error messages\n• Allow Atlas service to retry failed tasks\n\n*Are you sure?*",
+  "admin.geocoding.reset.confirm": "✅ Yes, Reset",
+  "admin.geocoding.reset.cancel": "❌ Cancel",
+  "admin.geocoding.reset.success": "✅ *Geocoding errors reset successfully!*\n\n*{count}* tasks have been reset.\n\nAtlas service will retry geocoding on next run.",
+  "admin.geocoding.reset.canceled": "❌ Reset operation canceled."
 }

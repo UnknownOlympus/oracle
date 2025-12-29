@@ -117,6 +117,8 @@ func (b *Bot) registerRoutes() {
 	b.bot.Handle("\fleave_comment", b.addCommentHandler)
 	b.bot.Handle("\fcomment_accept", b.commentAcceptHandler)
 	b.bot.Handle("\fcomment_decline", b.commentDeclineHandler)
+	b.bot.Handle("\fgeocoding_reset_confirm", b.geocodingResetConfirmHandler)
+	b.bot.Handle("\fgeocoding_reset_cancel", b.geocodingResetCancelHandler)
 }
 
 // getUserLanguage retrieves the user's language preference from the database.

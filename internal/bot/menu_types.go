@@ -184,12 +184,20 @@ func (r *MenuRegistry) registerAdminMenu() {
 	r.menus[MenuAdmin] = &MenuDefinition{
 		Type:     MenuAdmin,
 		TitleKey: "admin.panel.title",
-		Layout:   []int{1}, // 1 button per row
+		Layout:   []int{1, 1, 1}, // 1 button per row
 		HasBack:  true,
 		Buttons: []MenuButton{
 			{
 				TextKey: "menu.broadcast",
 				Handler: "broadcast_initiate",
+			},
+			{
+				TextKey: "menu.geocoding_issues",
+				Handler: "geocoding_issues",
+			},
+			{
+				TextKey: "menu.geocoding_reset",
+				Handler: "geocoding_reset",
 			},
 		},
 	}
