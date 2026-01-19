@@ -99,7 +99,7 @@
   "admin.geocoding.issue_entry": "`{num}.` Task *#{id}* ({attempts} attempts)\n   📍 {address}\n   ❌ {error}",
   "admin.geocoding.no_error_yet": "No error (not attempted yet)",
   "admin.geocoding.issues_truncated": "⚠️ _Showing first 20 issues only. Check Atlas service logs for full details._",
-  "admin.geocoding.reset.prompt": "⚠️ *Reset Geocoding Errors*\n\nThis will:\n• Set geocoding_attempts to 0 for all tasks\n• Clear geocoding_error messages\n• Allow Atlas service to retry failed tasks\n\n*Are you sure?*",
+  "admin.geocoding.reset.prompt": "⚠️ *Reset Geocoding Errors*\n\nThis will:\n• Set `geocoding_attempts` to 0 for all tasks\n• Clear `geocoding_error` messages\n• Allow Atlas service to retry failed tasks\n\n*Are you sure?*",
   "admin.geocoding.reset.confirm": "✅ Yes, Reset",
   "admin.geocoding.reset.cancel": "❌ Cancel",
   "admin.geocoding.reset.success": "✅ *Geocoding errors reset successfully!*\n\n*{count}* tasks have been reset.\n\nAtlas service will retry geocoding on next run.",
